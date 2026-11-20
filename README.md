@@ -64,7 +64,7 @@ See [flow requirements](docs/SDK-FLOW.md) for the remaining guided-flow and phys
 
 Use `<CredflareVerification sessionProvider={provider} onClose={close} />`. Your provider returns a session from the host application's authenticated backend. The component selects documents, guides capture, reviews evidence and refreshes remaining requirements after submission. Forms and location checks still need a host flow.
 
-Each document has its own rule. For example, require a camera photo of an ID and an uploaded bank statement in one profile. `either` allows one source per side, `snapshot` requires a camera photo, `upload` requires a saved file, and `snapshot_and_upload` requires both sources of the same document. Camera source is client-reported, not proof of a trusted camera feed.
+Each document has its own rule. For example, require a camera photo of an ID and an uploaded bank statement in one profile. `snapshot_or_upload` allows one source per side, `snapshot` requires a camera photo, `upload` requires a saved file, and `snapshot_and_upload` requires both sources of the same document. Camera source is client-reported, not proof of a trusted camera feed.
 
 The file picker supports permitted images, PDFs and DOCX files. Bundle the Ubuntu font files from `assets/fonts` into the host app's native font resources, as in the example. The SDK supplies light and dark themes.
 

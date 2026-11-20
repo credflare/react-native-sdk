@@ -335,7 +335,7 @@ export function CredflareDocumentCapture({
                 disabled={busy}
                 onPress={() => select(step!, selected.source)}
               />
-              {step!.source === "either" && (
+              {step!.source === "camera_or_upload" && (
                 <Link
                   title={
                     selected.source === "camera"
@@ -375,7 +375,7 @@ export function CredflareDocumentCapture({
             {canUpload && (
               <Action
                 title="Choose a file"
-                secondary={step!.source === "either"}
+                secondary={step!.source === "camera_or_upload"}
                 disabled={busy}
                 onPress={() => select(step!, "upload")}
               />
