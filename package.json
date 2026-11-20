@@ -6,15 +6,17 @@
   "types": "src/index.tsx",
   "files": [
     "src",
-    "docs"
+    "docs",
+    "assets"
   ],
   "workspaces": [
     "example"
   ],
   "dependencies": {
-    "@credflare/sdk-javascript": "file:../sdk-javascript",
+    "@credflare/sdk-javascript": "file:../javascript-sdk",
     "react-native-get-random-values": "^2.1.0",
-    "react-native-image-picker": "8.3.0"
+    "react-native-image-picker": "8.3.0",
+    "@react-native-documents/picker": "12.1.0"
   },
   "peerDependencies": {
     "react": "19.3.0",
@@ -22,7 +24,8 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "npm test --workspace=CredflareExample -- --runInBand"
+    "test": "npm test --workspace=CredflareExample -- --runInBand",
+    "validate": "npm run build --prefix ../javascript-sdk && npm run typecheck && npm test"
   },
   "devDependencies": {
     "@types/react": "^19.2.0",

@@ -1,15 +1,78 @@
 import React from 'react';
-import {Button, Text, TextInput} from 'react-native';
+import { Text, TextInput } from 'react-native';
 import ReactTestRenderer from 'react-test-renderer';
+import { Response } from 'whatwg-fetch';
 import App from '../App';
+const fixture = require('../../../javascript-sdk/test/fixtures/capture-snapshot_and_upload.json');
 
-test('requires a session and reports invalid input without opening capture', async () => {
+test('starts a combined flow without session entry and opens the camera step', async () => {
+  const fetcher = jest.fn(
+    async (_url: string, options?: RequestInit) =>
+      new Response(
+        JSON.stringify(
+          options?.method === 'POST'
+            ? {
+                session_id: fixture.data.session_id,
+                token: 'test-session-token',
+                api_base_url: 'https://api.example.test/api/v1',
+                expires_at: fixture.data.expires_at,
+              }
+            : fixture,
+        ),
+        { status: 200 },
+      ),
+  );
+  global.fetch = fetcher as typeof fetch;
   let renderer: ReactTestRenderer.ReactTestRenderer;
-  await ReactTestRenderer.act(async () => {renderer = ReactTestRenderer.create(<App/>);});
-  expect(renderer!.root.findByType(Button).props.title).toBe('Load session');
-  await ReactTestRenderer.act(async () => {renderer!.root.findByType(TextInput).props.onChangeText('{');});
-  await ReactTestRenderer.act(async () => {await renderer!.root.findByType(Button).props.onPress();});
-  const alert = renderer!.root.findAllByType(Text).find(node => node.props.accessibilityRole === 'alert');
-  expect(alert?.props.children.length).toBeGreaterThan(0);
-  expect(renderer!.root.findAllByType(Button)).toHaveLength(1);
-});
+  await ReactTestRenderer.act(async () => {
+    renderer = ReactTestRenderer.create(<App />);
+  });
+  const press = async (label: string) => {
+    const text = renderer!.root
+      .findAllByType(Text)
+      .find(node => node.props.children === label)!;
+    let node = text.parent!;
+    while (!node.props.onPress) node = node.parent!;
+    await ReactTestRenderer.act(async () => {
+      await node.props.onPress();
+    });
+  };
+  expect(renderer!.root.findAllByType(TextInput)).toHaveLength(0);
+  await press('Photos and files');
+  await press('Start verification');
+  expect(JSON.parse(fetcher.mock.calls[0][1]!.body as string).mode).toBe(
+    'snapshot_and_upload',
+  );
+  expect(
+    renderer!.root
+      .findAllByType(Text)
+      .some(n => n.props.children === 'Start verification'),
+  ).toBe(false);
+  const texts = () => renderer!.root.findAllByType(Text).map(n => n.props.children);
+  expect(texts()).toContain(fixture.data.requester.name);
+  expect(texts()).toContain('Test mode');
+  expect(texts()).toContain('Secured by Credflare');
+  expect(texts()).toContain('Photo and saved file');
+  await press(fixture.data.profile.document_requirements[0].document_type.name);
+  expect(
+    renderer!.root
+      .findAllByType(Text)
+      .some(n => n.props.children === 'Front'),
+  ).toBe(true);
+  expect(
+    renderer!.root
+      .findAllByType(Text)
+      .some(n => n.props.children === 'Camera photo'),
+  ).toBe(true);
+  expect(
+    renderer!.root
+      .findAllByType(Text)
+      .some(n => n.props.children === 'Credflare'),
+  ).toBe(false);
+  expect(
+    renderer!.root
+      .findAllByType(Text)
+      .some(n => n.props.children === 'Choose a file'),
+  ).toBe(false);
+  await ReactTestRenderer.act(async () => renderer!.unmount());
+}, 30000);

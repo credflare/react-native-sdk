@@ -1,8 +1,10 @@
-import {useCallback, useRef, useState} from 'react';
-import {CredflareSession} from '@credflare/sdk-javascript';
-import type {SessionDescriptor, SessionInfo} from '@credflare/sdk-javascript';
+import { useCallback, useRef, useState } from "react";
+import { CredflareSession } from "@credflare/sdk-javascript";
+import type { SessionDescriptor, SessionInfo } from "@credflare/sdk-javascript";
 
-export function useCredflareSession(provider: () => Promise<SessionDescriptor>) {
+export function useCredflareSession(
+  provider: () => Promise<SessionDescriptor>
+) {
   const active = useRef<Promise<SessionInfo> | undefined>(undefined);
   const client = useRef<CredflareSession | undefined>(undefined);
   const [info, setInfo] = useState<SessionInfo>();
@@ -10,7 +12,8 @@ export function useCredflareSession(provider: () => Promise<SessionDescriptor>) 
   const [error, setError] = useState<Error>();
   const load = useCallback(() => {
     if (active.current) return active.current;
-    setLoading(true); setError(undefined);
+    setLoading(true);
+    setError(undefined);
     const pending = (async () => {
       try {
         const descriptor = await provider();
@@ -20,7 +23,10 @@ export function useCredflareSession(provider: () => Promise<SessionDescriptor>) 
         setInfo(metadata);
         return metadata;
       } catch (cause) {
-        const failure = cause instanceof Error ? cause : new Error('Could not start verification.');
+        const failure =
+          cause instanceof Error
+            ? cause
+            : new Error("Could not start verification.");
         setError(failure);
         throw failure;
       } finally {
@@ -31,5 +37,5 @@ export function useCredflareSession(provider: () => Promise<SessionDescriptor>) 
     active.current = pending;
     return pending;
   }, [provider]);
-  return {session:client.current, info, loading, error, load};
+  return { session: client.current, info, loading, error, load };
 }
