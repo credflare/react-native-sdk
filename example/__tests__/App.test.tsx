@@ -38,11 +38,8 @@ test('starts a combined flow without session entry and opens the camera step', a
     });
   };
   expect(renderer!.root.findAllByType(TextInput)).toHaveLength(0);
-  await press('Photos and files');
   await press('Start verification');
-  expect(JSON.parse(fetcher.mock.calls[0][1]!.body as string).mode).toBe(
-    'snapshot_and_upload',
-  );
+  expect(JSON.parse(fetcher.mock.calls[0][1]!.body as string).mode).toBeUndefined();
   expect(
     renderer!.root
       .findAllByType(Text)
