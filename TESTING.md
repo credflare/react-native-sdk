@@ -5,7 +5,7 @@ Date: 2026-11-20. Host: macOS 26.3, Apple Silicon. React Native 0.88.1, React 19
 | Check | Result |
 | --- | --- |
 | TypeScript check | Passed |
-| Automatic session handoff, guided camera step and theme contrast | 2 passed |
+| Session handoff, selfie requirements and theme contrast | 3 passed |
 | iOS JavaScript release bundle | Passed |
 | iOS simulator native build | Passed |
 | iOS launch on iPhone 17 Pro, iOS 26.5 | Passed |

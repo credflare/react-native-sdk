@@ -22,6 +22,6 @@ A finished collection flow reports `submitted`. The application's backend obtain
 
 ## Release boundary
 
-The development packages provide a session client and guided native document collection. Applicants start without entering session credentials, choose a requested document, add each required side and source, review their evidence and receive a collection receipt. The flow refreshes outstanding requirements after each document.
+The development packages provide a session client and guided document and selfie collection. Applicants start without entering session credentials, choose a requested document, add each required side and source, review their evidence and receive a collection receipt. The flow refreshes outstanding requirements after each document and selfie. The developer selects the profile on their server; the recipient follows the outstanding requirements without a profile picker.
 
-Before a production release, add form and selfie steps, host-provided location capture, typed lifecycle results, guided session-renewal UI, Android process recovery, permission recovery, accessibility and physical-device capture tests. Liveness, trusted-camera and deepfake checks require real processing engines and independent validation before being advertised as available.
+Before a production release, add form steps, host-provided location capture, typed lifecycle results, guided session-renewal UI, Android process recovery, permission recovery, accessibility and physical-device capture tests. Liveness, trusted-camera and deepfake checks require real processing engines and independent validation before being advertised as available.

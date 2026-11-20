@@ -79,8 +79,18 @@ export const ui = StyleSheet.create({
     justifyContent: "center",
     gap: 6,
   },
-  footerMark: { width: 14, height: 14 },
-  body: { fontFamily: "Ubuntu-Regular", fontSize: 16, lineHeight: 24 },
+  footerMark: {
+    width: 16,
+    height: 16,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 3,
+  },
+  body: {
+    fontFamily: "Ubuntu-Regular",
+    fontSize: 16,
+    lineHeight: 24,
+    textAlign: "center",
+  },
   small: { fontFamily: "Ubuntu-Regular", fontSize: 13, lineHeight: 19 },
   eyebrow: { fontFamily: "Ubuntu-Medium", fontSize: 13, lineHeight: 18 },
   title: { fontFamily: "Ubuntu-Bold", fontSize: 24, lineHeight: 30 },
@@ -134,7 +144,11 @@ export const ui = StyleSheet.create({
   optionBody: { flex: 1, gap: 2 },
   chevron: { fontFamily: "Ubuntu-Regular", fontSize: 24, lineHeight: 28 },
   panel: { padding: 16, borderRadius: 14 },
-  illustration: { height: 88, alignItems: "flex-start", justifyContent: "center" },
+  illustration: {
+    height: 88,
+    alignItems: "flex-start",
+    justifyContent: "center",
+  },
   documentShape: {
     width: 56,
     height: 70,
@@ -155,7 +169,13 @@ export const ui = StyleSheet.create({
     borderRadius: 16,
     padding: 14,
   },
-  card: { flex: 1, borderWidth: 1, borderRadius: 10, padding: 12, overflow: "hidden" },
+  card: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 12,
+    overflow: "hidden",
+  },
   cardRow: { flex: 1, flexDirection: "row", gap: 12, alignItems: "center" },
   cardPhoto: {
     width: "34%",

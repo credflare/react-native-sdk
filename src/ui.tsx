@@ -29,7 +29,10 @@ export function Copy(props: TextProps & { muted?: boolean; small?: boolean }) {
 export function Title({ children }: { children: React.ReactNode }) {
   const p = usePalette();
   return (
-    <Text accessibilityRole="header" style={[ui.title, { color: p.ink }]}>
+    <Text
+      accessibilityRole="header"
+      style={[ui.title, { color: p.ink, textAlign: "center" }]}
+    >
       {children}
     </Text>
   );
@@ -151,10 +154,7 @@ export function VerifierHeader({
           />
         ) : null}
         {name ? (
-          <Text
-            numberOfLines={1}
-            style={[ui.verifierName, { color: p.ink }]}
-          >
+          <Text numberOfLines={1} style={[ui.verifierName, { color: p.ink }]}>
             {name}
           </Text>
         ) : null}
@@ -220,10 +220,7 @@ export function SideGuide({ side }: { side: "front" | "back" }) {
       style={[ui.guide, { borderColor: p.border, backgroundColor: p.soft }]}
     >
       <View
-        style={[
-          ui.card,
-          { borderColor: p.border, backgroundColor: p.surface },
-        ]}
+        style={[ui.card, { borderColor: p.border, backgroundColor: p.surface }]}
       >
         {side === "front" ? (
           <View style={ui.cardRow}>

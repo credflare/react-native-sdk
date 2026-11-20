@@ -62,7 +62,7 @@ See [flow requirements](docs/SDK-FLOW.md) for the remaining guided-flow and phys
 
 ## Guided flow
 
-Use `<CredflareVerification sessionProvider={provider} onClose={close} />`. Your provider returns a session from the host application's authenticated backend. The component selects documents, guides capture, reviews evidence and refreshes remaining requirements after submission. Forms and biometric checks still need a host flow.
+Use `<CredflareVerification sessionProvider={provider} onClose={close} />`. Your provider returns a session from the host application's authenticated backend. The component selects documents, guides capture, reviews evidence and refreshes remaining requirements after submission. Forms and location checks still need a host flow.
 
 Each document has its own rule. For example, require a camera photo of an ID and an uploaded bank statement in one profile. `either` allows one source per side, `snapshot` requires a camera photo, `upload` requires a saved file, and `snapshot_and_upload` requires both sources of the same document. Camera source is client-reported, not proof of a trusted camera feed.
 
@@ -73,3 +73,11 @@ Run `npm run validate` for the JavaScript build, TypeScript checks and native sc
 ## Upload test files
 
 Synthetic front and back PNGs are in the sibling JavaScript SDK at `test/fixtures/documents`. Android demo files are available under Downloads > Credflare-Samples. The iOS example enables local document sharing so files placed in its Documents directory appear in Files under On My iPhone. Use the Upload-Samples folder in either demo app. These are test documents, not real identity records.
+
+## Developer-configured facial collection
+
+Choose the compliance profile on your server when creating the case. The recipient does not choose a profile or verification mode. The SDK collects outstanding documents first, then opens the selfie step only when the case requests `facial_verification`. Selfie-only cases go directly to that step. Document alternatives and capture-source choices follow the server's requirement rules.
+
+The selfie step uses the front camera, provides a preview and retake action, and sends only after confirmation. Uploads use the scoped biometric endpoint; facial submissions reference the uploaded file ID. Retrying a send reuses its upload and submission keys. A receipt confirms collection for review, not a face match or liveness result.
+
+The backend currently reports liveness, trusted camera and deepfake detection as unavailable. Automated face matching and validated liveness processing are not implemented by this capture interface. Forms and location checks return control to the host app. Example apps obtain their requirements from the demo server without a recipient-facing profile selector.

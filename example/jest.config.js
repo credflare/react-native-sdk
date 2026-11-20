@@ -6,6 +6,7 @@ module.exports = {
   ],
   setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
   moduleNameMapper: {
+    '^\\./workflow\\.js$': '<rootDir>/../../javascript-sdk/src/workflow.ts',
     '^\\./capture\\.js$': '<rootDir>/../../javascript-sdk/src/capture.ts',
     '^@credflare/sdk-javascript$':
       '<rootDir>/../../javascript-sdk/src/index.ts',
