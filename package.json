@@ -14,9 +14,9 @@
   ],
   "dependencies": {
     "@credflare/sdk-javascript": "file:../javascript-sdk",
+    "@react-native-documents/picker": "12.1.0",
     "react-native-get-random-values": "^2.1.0",
-    "react-native-image-picker": "8.3.0",
-    "@react-native-documents/picker": "12.1.0"
+    "react-native-image-picker": "8.3.0"
   },
   "peerDependencies": {
     "react": "19.3.0",
@@ -25,12 +25,12 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "npm test --workspace=CredflareExample -- --runInBand",
-    "validate": "npm run build --prefix ../javascript-sdk && npm run typecheck && npm test"
+    "validate": "npm run build --prefix ../javascript-sdk && npm run typecheck && npm run lint --workspace=CredflareExample && npm test"
   },
   "devDependencies": {
     "@types/react": "^19.2.0",
-    "typescript": "7.0.2",
-    "react": "19.3.0"
+    "react": "19.3.0",
+    "typescript": "6.0.3"
   },
   "overrides": {
     "react": "19.3.0"

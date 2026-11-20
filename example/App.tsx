@@ -13,22 +13,22 @@ const modes = [
   {
     value: 'either',
     title: 'Photos or files',
-    description: 'Choose either method for each requested side.',
+    description: 'Profile allows a photo or a saved file for each side.',
   },
   {
     value: 'snapshot_and_upload',
     title: 'Photos and files',
-    description: 'Take each side with the camera, then upload each saved side.',
+    description: 'Profile requires a photo and a saved file of each side.',
   },
   {
     value: 'snapshot',
     title: 'Camera photos',
-    description: 'Take each requested side with the camera.',
+    description: 'Profile requires a camera photo of each side.',
   },
   {
     value: 'upload',
     title: 'File uploads',
-    description: 'Choose saved document images or PDFs.',
+    description: 'Profile requires saved images or PDFs.',
   },
 ];
 function Demo() {
@@ -62,8 +62,9 @@ function Demo() {
           Try document verification
         </Text>
         <Copy muted>
-          Choose a sample flow. A fresh sandbox session is created when you
-          start.
+          Choose a sample profile. Each profile sets its own capture method,
+          and the SDK follows whatever the case asks for. A fresh sandbox case
+          is created when you start.
         </Copy>
         <View style={ui.sectionGap} />
         {modes.map(option => (
