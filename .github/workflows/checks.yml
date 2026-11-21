@@ -1,0 +1,54 @@
+name: Checks
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: react-native-sdk
+      - uses: ./react-native-sdk/.github/actions/sdks
+      - run: npm run validate
+        working-directory: react-native-sdk
+  spec:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: react-native-sdk
+      - uses: ./react-native-sdk/.github/actions/sdks
+      - uses: actions/checkout@v4
+        with:
+          repository: credflare/sdk-spec
+          path: sdk-spec
+      - run: npm run check:spec
+        working-directory: react-native-sdk
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: react-native-sdk
+      - uses: ./react-native-sdk/.github/actions/sdks
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: ./gradlew assembleDebug
+        working-directory: react-native-sdk/example/android
+  ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: react-native-sdk
+      - uses: ./react-native-sdk/.github/actions/sdks
+      - run: pod install
+        working-directory: react-native-sdk/example/ios
+      - run: xcodebuild -workspace CredflareExample.xcworkspace -scheme CredflareExample -configuration Debug -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+        working-directory: react-native-sdk/example/ios
