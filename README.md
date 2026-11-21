@@ -1,6 +1,6 @@
 # CredFlare React Native SDK
 
-Development SDK with a typed applicant client, a session-provider hook and native document capture. Requires the scoped-session backend changes. No WebView is used. This package is not published. The initial compatibility target is React Native 0.88.1 with React 19.3.0.
+Development SDK with a typed applicant client, a session provider hook and native document, liveness and location capture. Requires the scoped-session backend changes. No WebView is used. This package is not published. The initial compatibility target is React Native 0.88.1 with React 19.3.0.
 
 ## Development setup
 
@@ -34,7 +34,7 @@ const info = await session.get();
 
 The component collects the requested sides, provides previews and retakes, and preserves upload IDs and retry keys after a failed send. It refuses trusted-camera requirements. `onSubmitted` means one document was received, not that the applicant was verified or that every requirement is complete.
 
-Your host UI selects requirements from the session response and refreshes them after each submission. Preserve grouped document alternatives. Use the session client for requested form, facial-photo and location data. Liveness and deepfake detection are not available.
+Your host UI selects requirements from the session response and refreshes them after each submission. Preserve grouped document alternatives. The guided flow below also collects liveness and location.
 
 `useCredflareSession(provider)` fetches a descriptor from your authenticated backend and exposes `session`, `info`, `loading`, `error` and `load`. Concurrent loads share one operation. The provider must always refer to the same verification case. Calling `load` again lets the host request a replacement session while retaining the client object. Keep the capture component mounted to preserve its retry state.
 
@@ -42,9 +42,26 @@ Client errors expose `status`, `type` and validation `errors`. Use `session.canc
 
 ## App configuration
 
-Add `react-native-image-picker`, `@react-native-documents/picker` and `react-native-get-random-values` as direct app dependencies so the native modules are linked. Run pod installation for iOS. Add `NSCameraUsageDescription` and `NSPhotoLibraryUsageDescription` to the app's Info.plist. This photo-only flow does not require microphone permission.
+Add these as direct app dependencies so their native modules are linked:
 
-If the Android app declares camera permission independently, it must request that permission before opening capture. Keep client credentials on the server. Treat session descriptors as temporary credentials and keep them out of logs and persistent storage.
+| Package | Version | Used for |
+| --- | --- | --- |
+| `react-native-image-picker` | 8.3.0 | Document photos |
+| `@react-native-documents/picker` | 12.1.0 | Saved files |
+| `react-native-get-random-values` | 2.1.0 | Request keys |
+| `react-native-vision-camera` | 5.2.4 | Liveness preview, gesture frames, video and selfie |
+| `react-native-nitro-modules` | 0.37.2 | Required by the camera packages |
+| `react-native-nitro-image` | 0.15.2 | Required by the camera |
+| `react-native-vision-camera-face-detector` | 2.1.0 | ML Kit face signals as a camera output |
+| `react-native-geolocation-service` | 5.3.1 | Location fixes |
+| `react-native-svg` | 15.16.1 | Spec icons |
+
+Run pod installation for iOS. Permissions:
+
+- iOS `Info.plist`: `NSCameraUsageDescription`, `NSPhotoLibraryUsageDescription` and `NSLocationWhenInUseUsageDescription`. Video is recorded without audio, so no microphone permission is needed.
+- Android manifest: `android.permission.CAMERA`, `android.permission.ACCESS_FINE_LOCATION` and `android.permission.ACCESS_COARSE_LOCATION`. The SDK requests location at runtime; the camera package requests camera access when liveness starts.
+
+Keep client credentials on the server. Treat session descriptors as temporary credentials and keep them out of logs and persistent storage.
 
 ## Example
 
@@ -56,28 +73,26 @@ npm start
 npm run ios
 ```
 
-For Android, run `npm run android` with the Android SDK and JDK configured. When using a local API on the Android emulator, forward its port with `adb reverse tcp:8000 tcp:8000` and return a loopback API URL in the descriptor.
+For Android, run `npm run android` with the Android SDK and JDK 17 configured. When using a local API on the Android emulator, forward the demo and API ports with `adb reverse tcp:3107 tcp:3107` and `adb reverse tcp:8018 tcp:8018` (or your API port) and return a loopback API URL in the descriptor.
 
 See [flow requirements](docs/SDK-FLOW.md) for the remaining guided-flow and physical-device release requirements.
 
 ## Guided flow
 
-Use `<CredflareVerification sessionProvider={provider} onClose={close} />`. Your provider returns a session from the host application's authenticated backend. The component selects documents, guides capture, reviews evidence and refreshes remaining requirements after submission. Forms and location checks still need a host flow.
+Use `<CredflareVerification sessionProvider={provider} onClose={close} />`. Your provider returns a session from the host application's authenticated backend. The component selects documents, guides capture, reviews evidence, then runs the remaining `facial_verification` and `location_verification` requirements in profile order and ends with a receipt that lists what was received. Forms and other checks are left to the host app, and the receipt says so.
 
-Each document has its own rule. For example, require a camera photo of an ID and an uploaded bank statement in one profile. `snapshot_or_upload` allows one source per side, `snapshot` requires a camera photo, `upload` requires a saved file, and `snapshot_and_upload` requires both sources of the same document. Camera source is client-reported, not proof of a trusted camera feed.
+Each document has its own rule. For example, require a camera photo of an ID and an uploaded bank statement in one profile. `snapshot_or_upload` allows one source per side, `snapshot` requires a camera photo, `upload` requires a saved file, and `snapshot_and_upload` requires both sources of the same document. Camera source is client reported, not proof of a trusted camera feed.
 
-The file picker supports permitted images, PDFs and DOCX files. Bundle the Ubuntu font files from `assets/fonts` into the host app's native font resources, as in the example. The SDK supplies light and dark themes.
+Liveness requests a server challenge, shows the front camera with positioning hints, runs the server's gestures in order through the gesture engine shared with the JavaScript SDK, takes a JPEG frame as each gesture completes, records a video without audio during the challenge when `record_video` is on, then takes the selfie and uploads everything with the challenge ID. A timeout or an expired challenge offers a retry with a new challenge. The checks show that the camera saw a server chosen sequence in time; they do not prove a live person or detect deepfakes.
 
-Run `npm run validate` for the JavaScript build, TypeScript checks and native screen tests. Run native builds separately with the configured SDKs.
+Face signals come from ML Kit face detection through `react-native-vision-camera-face-detector`, attached to the camera as an output (`mlKitFaceProvider`). Pass `faceProvider` to use another provider with the same `NativeFaceProvider` shape, for example in tests. The provider sends ML Kit's `headEulerAngleY` as `yaw` and `headEulerAngleX` as `pitch`, read from the unmirrored frames ML Kit analyses. The contract expects `yaw` positive when the person turns to their own left and `pitch` positive when the head tilts up.
+
+Location shows the consent copy (naming the reference place by its label when one is configured), requests permission, takes a high accuracy fix and retries up to the spec attempts until it meets `max_accuracy_m` and `max_age_s`. Android reports `is_mock` from the platform's mock flag; iOS sends `null`. Server rejections are shown with their reason and a retry. No geocoding or IP lookup is called. Pass `locator` to replace the native location source.
+
+All copy, colours, type sizes and icons come from the spec constants exported by the JavaScript SDK; text is centred on every screen. The file picker supports permitted images, PDFs and DOCX files. Bundle the Ubuntu font files from `assets/fonts` into the host app's native font resources, as in the example. The SDK supplies light and dark themes.
+
+Run `npm run validate` for the JavaScript build, TypeScript checks, lint and screen tests, and `npm run check:spec` to confirm the JavaScript SDK's generated spec matches `../sdk-spec`. See [TESTING.md](TESTING.md).
 
 ## Upload test files
 
 Synthetic front and back PNGs are in the sibling JavaScript SDK at `test/fixtures/documents`. Android demo files are available under Downloads > Credflare-Samples. The iOS example enables local document sharing so files placed in its Documents directory appear in Files under On My iPhone. Use the Upload-Samples folder in either demo app. These are test documents, not real identity records.
-
-## Developer-configured facial collection
-
-Choose the compliance profile on your server when creating the case. The recipient does not choose a profile or verification mode. The SDK collects outstanding documents first, then opens the selfie step only when the case requests `facial_verification`. Selfie-only cases go directly to that step. Document alternatives and capture-source choices follow the server's requirement rules.
-
-The selfie step uses the front camera, provides a preview and retake action, and sends only after confirmation. Uploads use the scoped biometric endpoint; facial submissions reference the uploaded file ID. Retrying a send reuses its upload and submission keys. A receipt confirms collection for review, not a face match or liveness result.
-
-The backend currently reports liveness, trusted camera and deepfake detection as unavailable. Automated face matching and validated liveness processing are not implemented by this capture interface. Forms and location checks return control to the host app. Example apps obtain their requirements from the demo server without a recipient-facing profile selector.
