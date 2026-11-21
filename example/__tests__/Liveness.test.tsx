@@ -1,6 +1,7 @@
 import React from 'react';
 import ReactTestRenderer from 'react-test-renderer';
 import type { LivenessCameraProps } from '@credflare/sdk-react-native';
+import { text } from '@credflare/sdk-javascript';
 import { CredflareVerification } from '../../src/verification-flow';
 import { descriptor, fakeApi, fixture, helpers, replayProvider } from '../test-support/flow-harness';
 
@@ -91,4 +92,50 @@ test('a used challenge rejected by code restarts with a new challenge', async ()
   await press('Try again');
   await waitFor(() => api.calls.filter(call => call.url.endsWith('/liveness-challenges')).length === 2, 'new challenge');
   await ReactTestRenderer.act(async () => renderer!.unmount());
+}, 60000);
+
+async function reachReview(api: ReturnType<typeof fakeApi>) {
+  global.fetch = api.fetcher as unknown as typeof fetch;
+  const provider = replayProvider(api.gestures);
+  let renderer: ReactTestRenderer.ReactTestRenderer;
+  await ReactTestRenderer.act(async () => {
+    renderer = ReactTestRenderer.create(
+      <CredflareVerification autoStart onClose={() => {}} sessionProvider={descriptor} faceProvider={provider} />,
+    );
+  });
+  const view = helpers(() => renderer!);
+  await view.waitFor(() => view.texts().includes('Start'), 'intro');
+  await view.press('Start');
+  await view.waitFor(() => view.texts().includes('Take selfie'), 'selfie step', 20000);
+  await view.press('Take selfie');
+  await view.waitFor(() => view.texts().includes('Send selfie'), 'review');
+  return { ...view, unmount: () => ReactTestRenderer.act(async () => renderer!.unmount()) };
+}
+
+test('a send that never reached the server keeps the uploads and retries the submission with the same request key', async () => {
+  const api = fakeApi({ droppedSubmits: 1 });
+  const { texts, press, waitFor, unmount } = await reachReview(api);
+  await press('Send selfie');
+  await waitFor(() => texts().includes(text('errors.network')), 'network failure');
+  expect(texts()).toContain('Send selfie');
+  await press('Send selfie');
+  await waitFor(() => texts().includes('Share location'), 'location step');
+  const uploads = api.calls.filter(call => call.url.endsWith('/uploads/biometrics'));
+  expect(uploads).toHaveLength(5);
+  const keys = api.calls.filter(call => call.url.endsWith('/submit')).map(call => call.key);
+  expect(keys).toHaveLength(2);
+  expect(keys[1]).toBe(keys[0]);
+  expect(api.calls.filter(call => call.url.endsWith('/liveness-challenges'))).toHaveLength(1);
+  await unmount();
+}, 60000);
+
+test('a rejection that leaves the challenge valid shows the server reason without a new challenge', async () => {
+  const api = fakeApi({ facialRejections: ['rejections/liveness.gesture_mismatch'] });
+  const { texts, press, waitFor, unmount } = await reachReview(api);
+  await press('Send selfie');
+  const reason = fixture('rejections/liveness.gesture_mismatch').message;
+  await waitFor(() => texts().includes(reason), 'server reason');
+  expect(texts()).not.toContain(text('liveness.expired'));
+  expect(api.calls.filter(call => call.url.endsWith('/liveness-challenges'))).toHaveLength(1);
+  await unmount();
 }, 60000);

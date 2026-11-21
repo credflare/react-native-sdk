@@ -1,6 +1,7 @@
 import React from 'react';
 import ReactTestRenderer from 'react-test-renderer';
 import type { LocationFix } from '@credflare/sdk-react-native';
+import { text } from '@credflare/sdk-javascript';
 import { CredflareVerification } from '../../src/verification-flow';
 import { positionToFix } from '../../src/location-step';
 import { descriptor, fakeApi, helpers, replayProvider } from '../test-support/flow-harness';
@@ -46,6 +47,59 @@ test('asks for the location at the reference place, retries a weak fix, shows se
   expect(submits).toHaveLength(3);
   expect(new Set(submits.map(item => item.key)).size).toBe(3);
   expect(submits[2]).toMatchObject({ type: 'location_verification', latitude: 4.0511, longitude: 9.7679, metadata: { accuracy: 12, altitude: null, is_mock: false, provider: 'gps' } });
+  await ReactTestRenderer.act(async () => renderer!.unmount());
+}, 60000);
+
+function fixedLocator(fix: Partial<LocationFix>) {
+  return {
+    requestPermission: jest.fn(async () => true),
+    getFix: jest.fn(async (): Promise<LocationFix> => ({ latitude: 4.0511, longitude: 9.7679, accuracy: 12, altitude: null, fixTime: Date.now(), isMock: false, provider: 'gps', ...fix })),
+  };
+}
+
+test('a mock location is refused on the device and never sent', async () => {
+  const api = fakeApi();
+  api.stage.facial = true;
+  global.fetch = api.fetcher as unknown as typeof fetch;
+  const locator = fixedLocator({ isMock: true, accuracy: 5 });
+  let renderer: ReactTestRenderer.ReactTestRenderer;
+  await ReactTestRenderer.act(async () => {
+    renderer = ReactTestRenderer.create(
+      <CredflareVerification autoStart onClose={() => {}} sessionProvider={descriptor} faceProvider={replayProvider(() => null)} locator={locator} />,
+    );
+  });
+  const { texts, press, waitFor } = helpers(() => renderer!);
+  await waitFor(() => texts().includes('Share location'), 'location consent');
+  await press('Share location');
+  await waitFor(() => texts().includes(text('location.mock_detected')), 'mock refusal');
+  expect(locator.getFix).toHaveBeenCalledTimes(1);
+  expect(texts()).not.toContain('Send location');
+  expect(api.calls.filter(call => call.url.endsWith('/submit'))).toHaveLength(0);
+  await ReactTestRenderer.act(async () => renderer!.unmount());
+}, 60000);
+
+test('a send that never reached the server is retried with the same request key', async () => {
+  const api = fakeApi({ droppedSubmits: 1 });
+  api.stage.facial = true;
+  global.fetch = api.fetcher as unknown as typeof fetch;
+  let renderer: ReactTestRenderer.ReactTestRenderer;
+  await ReactTestRenderer.act(async () => {
+    renderer = ReactTestRenderer.create(
+      <CredflareVerification autoStart onClose={() => {}} sessionProvider={descriptor} faceProvider={replayProvider(() => null)} locator={fixedLocator({})} />,
+    );
+  });
+  const { texts, press, waitFor } = helpers(() => renderer!);
+  await waitFor(() => texts().includes('Share location'), 'location consent');
+  await press('Share location');
+  await waitFor(() => texts().includes('Send location'), 'fix found');
+  await press('Send location');
+  await waitFor(() => texts().includes(text('errors.send_location_failed')), 'network failure');
+  await press('Send location');
+  await waitFor(() => texts().includes('Evidence received'), 'receipt');
+  const keys = api.calls.filter(call => call.url.endsWith('/submit')).map(call => call.key);
+  expect(keys).toHaveLength(2);
+  expect(keys[0]).toMatch(/^[0-9a-f-]{36}$/);
+  expect(keys[1]).toBe(keys[0]);
   await ReactTestRenderer.act(async () => renderer!.unmount());
 }, 60000);
 

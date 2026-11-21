@@ -56,11 +56,11 @@ export interface Call {
   key?: string;
 }
 
-export function fakeApi(options: { locationRejections?: string[]; facialRejections?: string[]; session?: string } = {}) {
+export function fakeApi(options: { locationRejections?: string[]; facialRejections?: string[]; session?: string; droppedSubmits?: number } = {}) {
   const capture = fixture(options.session ?? 'capture-session');
   const rejections = [...(options.locationRejections ?? [])];
   const facialRejections = [...(options.facialRejections ?? [])];
-  const stage = { facial: false, location: false, locationTries: 0 };
+  const stage = { facial: false, location: false, locationTries: 0, dropped: options.droppedSubmits ?? 0 };
   const calls: Call[] = [];
   let gestures: string[] | null = null;
   const json = (status: number, value: unknown) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
@@ -87,6 +87,10 @@ export function fakeApi(options: { locationRejections?: string[]; facialRejectio
       return json(201, fixture({ gesture: 'gesture-upload', liveness_video: 'video-upload', selfie: 'selfie-upload' }[String(type)]!));
     }
     if (url.endsWith('/submit')) {
+      if (stage.dropped > 0) {
+        stage.dropped -= 1;
+        throw new TypeError('Network request failed');
+      }
       const payload = JSON.parse(String(init!.body));
       if (payload.type === 'facial_verification') {
         const rejected = facialRejections.shift();
