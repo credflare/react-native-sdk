@@ -56,7 +56,7 @@ Add these as direct app dependencies so their native modules are linked:
 | `react-native-geolocation-service` | 5.3.1 | Location fixes |
 | `react-native-svg` | 15.16.1 | Spec icons |
 
-Run pod installation for iOS. Permissions:
+Run pod installation for iOS. The face detector requires iOS 15.5 or later, so set `platform :ios, '15.5'` in the Podfile and the app's deployment target to match. Permissions:
 
 - iOS `Info.plist`: `NSCameraUsageDescription`, `NSPhotoLibraryUsageDescription` and `NSLocationWhenInUseUsageDescription`. Video is recorded without audio, so no microphone permission is needed.
 - Android manifest: `android.permission.CAMERA`, `android.permission.ACCESS_FINE_LOCATION` and `android.permission.ACCESS_COARSE_LOCATION`. The SDK requests location at runtime; the camera package requests camera access when liveness starts.
