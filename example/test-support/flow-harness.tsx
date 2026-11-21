@@ -56,9 +56,10 @@ export interface Call {
   key?: string;
 }
 
-export function fakeApi(options: { locationRejections?: string[]; session?: string } = {}) {
+export function fakeApi(options: { locationRejections?: string[]; facialRejections?: string[]; session?: string } = {}) {
   const capture = fixture(options.session ?? 'capture-session');
   const rejections = [...(options.locationRejections ?? [])];
+  const facialRejections = [...(options.facialRejections ?? [])];
   const stage = { facial: false, location: false, locationTries: 0 };
   const calls: Call[] = [];
   let gestures: string[] | null = null;
@@ -88,6 +89,8 @@ export function fakeApi(options: { locationRejections?: string[]; session?: stri
     if (url.endsWith('/submit')) {
       const payload = JSON.parse(String(init!.body));
       if (payload.type === 'facial_verification') {
+        const rejected = facialRejections.shift();
+        if (rejected) return json(422, fixture(rejected));
         stage.facial = true;
         return json(201, fixture('facial-submission'));
       }

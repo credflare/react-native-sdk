@@ -128,7 +128,7 @@ export function CredflareLocation({
       if (cause instanceof CredflareError && cause.status === 422) submitKey.current = requestKey();
       setError(
         cause instanceof CredflareError && cause.status !== 0
-          ? locationRejection(cause.status, cause.message, settings) ?? livenessErrorMessage(cause)
+          ? locationRejection(cause.code, settings) ?? livenessErrorMessage(cause)
           : text("errors.send_location_failed"),
       );
     } finally {

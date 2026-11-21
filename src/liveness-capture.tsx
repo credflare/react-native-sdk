@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { Image, Text, View } from "react-native";
 import {
   CredflareError,
+  challengeRejected,
   createChallengeRun,
   facialSettings,
   livenessErrorMessage,
@@ -191,7 +192,7 @@ export function CredflareLiveness({ session, info, provider, onSubmitted, onBusy
     } catch (cause) {
       if (!mounted.current) return;
       setStatus(undefined);
-      if (cause instanceof CredflareError && cause.status === 422 && /challenge/i.test(cause.message)) return fail(livenessErrorMessage(cause));
+      if (challengeRejected(cause)) return fail(text("liveness.expired"));
       setError(livenessErrorMessage(cause, text("errors.send_selfie_failed")));
       working(false);
     }

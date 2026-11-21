@@ -39,7 +39,9 @@ test('runs the server challenge from replayed face samples, uploads the evidence
     expect((call.body as FormData).get('capture_source')).toBe('camera');
     expect(call.key).toMatch(/^[0-9a-f-]{36}$/);
   }
-  const submitted = JSON.parse(String(api.calls.find(call => call.url.endsWith('/submit'))!.body));
+  const submitCall = api.calls.find(call => call.url.endsWith('/submit'))!;
+  expect(submitCall.key).toMatch(/^[0-9a-f-]{36}$/);
+  const submitted = JSON.parse(String(submitCall.body));
   expect(submitted).toMatchObject({ type: 'facial_verification', challenge_id: challenge.challenge_id, image_file_id: 4, gesture_file_ids: [3, 3, 3], video_file_id: 5 });
   expect(submitted.metadata.provider).toBe('default');
   expect(submitted.metadata.liveness_results.map((item: { challenge: string }) => item.challenge)).toEqual(challenge.gestures);
@@ -64,5 +66,29 @@ test('a gesture timeout offers a retry that asks for a new challenge', async () 
   expect(texts()).toContain('Try again');
   await press('Try again');
   await waitFor(() => api.calls.filter(call => call.url.endsWith('/liveness-challenges')).length === 2, 'second challenge');
+  await ReactTestRenderer.act(async () => renderer!.unmount());
+}, 60000);
+
+test('a used challenge rejected by code restarts with a new challenge', async () => {
+  const api = fakeApi({ facialRejections: ['rejections/liveness.challenge_used'] });
+  global.fetch = api.fetcher as unknown as typeof fetch;
+  const provider = replayProvider(api.gestures);
+  let renderer: ReactTestRenderer.ReactTestRenderer;
+  await ReactTestRenderer.act(async () => {
+    renderer = ReactTestRenderer.create(
+      <CredflareVerification autoStart onClose={() => {}} sessionProvider={descriptor} faceProvider={provider} />,
+    );
+  });
+  const { texts, press, waitFor } = helpers(() => renderer!);
+  await waitFor(() => texts().includes('Start'), 'intro');
+  await press('Start');
+  await waitFor(() => texts().includes('Take selfie'), 'selfie step', 20000);
+  await press('Take selfie');
+  await waitFor(() => texts().includes('Send selfie'), 'review');
+  await press('Send selfie');
+  await waitFor(() => texts().includes('This step timed out. Start it again.'), 'restart prompt');
+  expect(texts()).not.toContain(fixture('rejections/liveness.challenge_used').message);
+  await press('Try again');
+  await waitFor(() => api.calls.filter(call => call.url.endsWith('/liveness-challenges')).length === 2, 'new challenge');
   await ReactTestRenderer.act(async () => renderer!.unmount());
 }, 60000);

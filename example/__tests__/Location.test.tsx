@@ -3,9 +3,9 @@ import ReactTestRenderer from 'react-test-renderer';
 import type { LocationFix } from '@credflare/sdk-react-native';
 import { CredflareVerification } from '../../src/verification-flow';
 import { positionToFix } from '../../src/location-step';
-import { descriptor, fakeApi, fixture, helpers, replayProvider } from '../test-support/flow-harness';
+import { descriptor, fakeApi, helpers, replayProvider } from '../test-support/flow-harness';
 
-test('asks for the location at the reference place, retries a weak fix, shows a server rejection and ends with a receipt', async () => {
+test('asks for the location at the reference place, retries a weak fix, shows server rejections by code and ends with a receipt', async () => {
   const api = fakeApi({ locationRejections: ['location-rejection', 'reference-rejection'] });
   api.stage.facial = true;
   global.fetch = api.fetcher as unknown as typeof fetch;
@@ -36,7 +36,7 @@ test('asks for the location at the reference place, retries a weak fix, shows a 
   await waitFor(() => texts().includes('Send location'), 'fix found');
   expect(texts()).toContain('Within 12 m');
   await press('Send location');
-  await waitFor(() => texts().includes(fixture('location-rejection').message), 'server rejection');
+  await waitFor(() => texts().includes('Your location is not precise enough to check this place. Move near a window or outside, then try again.'), 'accuracy rejection');
   await press('Send location');
   await waitFor(() => texts().includes('You do not seem to be at Head office yet. Move closer, then try again.'), 'place rejection');
   await press('Send location');
