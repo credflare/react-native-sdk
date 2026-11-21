@@ -11,22 +11,30 @@ import {
   CredflareError,
   CredflareSession,
   isCaptureSupported,
+  documentsNextKey,
   methodSummary,
-  requiresSelfie,
-  needsHostSteps,
+  nextStep,
+  text,
+  verifierName,
 } from "@credflare/sdk-javascript";
 import type {
   DocumentRequirement,
   SessionDescriptor,
   SessionInfo,
 } from "@credflare/sdk-javascript";
-import { CredflareSelfieCapture } from "./selfie-capture";
+import { CredflareLiveness } from "./liveness-capture";
+import { CredflareLocation } from "./location-step";
+import type { Locator } from "./location-step";
+import { mlKitFaceProvider } from "./liveness-camera";
+import type { NativeFaceProvider } from "./liveness-camera";
 import { CredflareDocumentCapture } from "./document-capture";
+import { SpecIcon } from "./icon";
 import {
   Action,
   ConfirmSheet,
   Copy,
   DocumentIllustration,
+  Illustration,
   Link,
   Notice,
   SecuredBy,
@@ -41,6 +49,8 @@ export interface VerificationProps {
   onSubmitted?: (info: SessionInfo) => void;
   onCancelled?: () => void;
   autoStart?: boolean;
+  faceProvider?: NativeFaceProvider;
+  locator?: Locator;
 }
 interface DocumentSection {
   key: string;
@@ -58,7 +68,7 @@ export function documentSections(
   }
   return [
     ...(required.length
-      ? [{ key: "required", label: "Required", items: required }]
+      ? [{ key: "required", label: text("documents.section_required"), items: required }]
       : []),
     ...[...groups].map(([key, items]) => {
       const count = items[0].remaining_required ?? items[0].min_required ?? 1;
@@ -66,10 +76,10 @@ export function documentSections(
         key,
         label:
           items.length === 1
-            ? "Required"
+            ? text("documents.section_required")
             : count === 1
-            ? "Provide one of these"
-            : `Provide ${count} of these`,
+            ? text("documents.section_one_of")
+            : text("documents.section_count_of", { count }),
         items,
       };
     }),
@@ -81,6 +91,8 @@ export function CredflareVerification({
   onSubmitted,
   onCancelled,
   autoStart = false,
+  faceProvider = mlKitFaceProvider,
+  locator,
 }: VerificationProps) {
   const p = usePalette(),
     client = useRef<CredflareSession | undefined>(undefined),
@@ -94,11 +106,12 @@ export function CredflareVerification({
     [error, setError] = useState<string>(),
     [confirmExit, setConfirmExit] = useState(false),
     [confirmDiscard, setConfirmDiscard] = useState(false),
-    [pendingReceipt, setPendingReceipt] = useState(false);
+    [pendingReceipt, setPendingReceipt] = useState(false),
+    [received, setReceived] = useState<string[]>([]);
   const message = (cause: unknown, fallback: string) =>
     cause instanceof CredflareError
       ? cause.status === 401
-        ? "Your session has expired. Close this screen and start again."
+        ? text("errors.session_expired")
         : cause.status === 0
         ? fallback
         : cause.message
@@ -120,7 +133,7 @@ export function CredflareVerification({
         setError(
           message(
             cause,
-            "We could not start. Check your connection and try again.",
+            text("errors.start_failed"),
           ),
         );
     } finally {
@@ -148,18 +161,11 @@ export function CredflareVerification({
       if (!mounted.current) return;
       setInfo(metadata);
       setPendingReceipt(false);
-      const profile = metadata.profile;
-      if (
-        !!profile &&
-        !profile.document_requirements.length &&
-        !profile?.form_schema?.length &&
-        !profile?.verification_requirements.length
-      )
-        onSubmitted?.(metadata);
+      if (nextStep(metadata) === "done") onSubmitted?.(metadata);
     } catch (cause) {
       if (mounted.current)
         setError(
-          message(cause, "We could not check what is still needed. Try again."),
+          message(cause, text("errors.refresh_failed")),
         );
     } finally {
       active.current = false;
@@ -170,12 +176,14 @@ export function CredflareVerification({
     if (captureDirty) setConfirmDiscard(true);
     else setDocument(undefined);
   }
-  const verifier = info?.requester?.name ?? "your verifier";
+  const verifier = verifierName(info);
   const docs = info?.profile?.document_requirements ?? [];
-  const selfie = !!info && requiresSelfie(info);
-  const otherSteps = !!info && needsHostSteps(info);
-  const allReceived =
-    !!info && !docs.length && !selfie && !otherSteps && !pendingReceipt;
+  const step = info ? nextStep(info) : null;
+  const allReceived = !pendingReceipt && (step === "done" || step === "host");
+  const receive = (label: string) => {
+    setReceived(items => [...items, label]);
+    void refresh();
+  };
   useEffect(() => {
     const listener = BackHandler.addEventListener("hardwareBackPress", () => {
       if (!loading && !captureBusy) {
@@ -206,49 +214,73 @@ export function CredflareVerification({
             style={{ gap: 20, paddingVertical: 64 }}
           >
             <ActivityIndicator size="large" color={p.primary} />
-            <Copy muted style={{ textAlign: "center" }}>
-              {info ? "Checking what is still needed…" : "Getting ready…"}
+            <Copy muted>
+              {info ? text("intro.checking") : text("common.loading")}
             </Copy>
           </View>
         ) : !info ? (
           <>
             <View style={ui.sectionGap} />
             <DocumentIllustration />
-            <Title>Verify your identity</Title>
-            <Copy muted>
-              Follow the steps requested by your verifier. Review each item
-              before sending.
-            </Copy>
+            <Title>{text("intro.title")}</Title>
+            <Copy muted>{text("intro.body", { verifier })}</Copy>
             {notice}
             <View style={ui.sectionGap} />
-            <Action title={error ? "Try again" : "Start"} onPress={start} />
+            <Action
+              title={error ? text("common.try_again") : text("intro.start")}
+              onPress={start}
+            />
           </>
         ) : pendingReceipt ? (
           <>
-            <Title>Your evidence was sent</Title>
+            <Title>{text("sending.sent_title")}</Title>
+            <Copy muted>{text("sending.sent_body")}</Copy>
             {notice}
-            <Action title="Check again" onPress={refresh} />
+            <Action title={text("sending.check_again")} onPress={refresh} />
           </>
         ) : allReceived ? (
           <>
             <View style={ui.sectionGap} />
-            <DocumentIllustration />
-            <Title>Evidence received</Title>
-            <Copy muted>
-              {info.requester?.name ?? "Your verifier"} will review what you
-              sent. You can close this screen.
-            </Copy>
+            <Illustration name="received_illustration" />
+            <Title>{text("receipt.title")}</Title>
+            <Copy muted>{text("receipt.body", { verifier })}</Copy>
+            {received.map((label, index) => (
+              <View
+                key={`${label}-${index}`}
+                style={[ui.infoCard, { borderColor: p.border }]}
+              >
+                <SpecIcon name="received" color={p.success} />
+                <Copy>{label}</Copy>
+              </View>
+            ))}
+            {step === "host" ? (
+              <Copy muted>{text("receipt.host_steps")}</Copy>
+            ) : null}
+            {notice}
             <View style={ui.sectionGap} />
-            <Action title="Done" onPress={onClose} />
+            <Action
+              title={
+                step === "host"
+                  ? text("common.return_to_app")
+                  : text("receipt.done")
+              }
+              onPress={onClose}
+            />
           </>
         ) : document ? (
           <>
-            <View style={{ alignSelf: "flex-start" }}>
-              <Link
-                title="‹ Documents"
+            <View style={{ alignSelf: "center" }}>
+              <Pressable
+                accessibilityRole="button"
                 disabled={captureBusy}
                 onPress={leaveDocument}
-              />
+                style={[ui.ghost, { flexDirection: "row", gap: 4 }]}
+              >
+                <SpecIcon name="chevron_left" color={p.primary} />
+                <Text style={[ui.buttonText, { color: p.primary }]}>
+                  {text("documents.back")}
+                </Text>
+              </Pressable>
             </View>
             <CredflareDocumentCapture
               key={document.document_type.id}
@@ -257,37 +289,41 @@ export function CredflareVerification({
               requesterName={info.requester?.name}
               maxFileSizeBytes={info.upload_limits.max_file_size_bytes}
               allowedFileTypes={info.upload_limits.allowed_file_types}
-              onSubmitted={() => void refresh()}
+              onSubmitted={() =>
+                receive(
+                  text("receipt.document", {
+                    document: document.document_type.name,
+                  }),
+                )
+              }
               onBusyChanged={setCaptureBusy}
               onDirtyChanged={setCaptureDirty}
             />
           </>
-        ) : !docs.length && selfie ? (
-          <CredflareSelfieCapture
+        ) : step === "facial_verification" ? (
+          <CredflareLiveness
             session={client.current!}
             info={info}
-            onSubmitted={() => void refresh()}
+            provider={faceProvider}
+            onSubmitted={() => receive(text("receipt.selfie"))}
             onBusyChanged={setCaptureBusy}
-            onDirtyChanged={setCaptureDirty}
           />
-        ) : !docs.length ? (
-          <>
-            <View style={ui.sectionGap} />
-            <Title>Evidence received</Title>
-            <Copy muted>
-              {info.requester?.name
-                ? `${info.requester.name}'s app`
-                : "The app"}{" "}
-              will guide you through the remaining steps.
-            </Copy>
-            {notice}
-            <View style={ui.sectionGap} />
-            <Action title="Return to app" onPress={onClose} />
-          </>
+        ) : step === "location_verification" ? (
+          <CredflareLocation
+            session={client.current!}
+            info={info}
+            locator={locator}
+            onSubmitted={() => receive(text("receipt.location"))}
+            onBusyChanged={setCaptureBusy}
+          />
         ) : (
           <>
-            <Title>Documents requested</Title>
-            <Copy muted>Requested by {verifier}.</Copy>
+            <Illustration name="id_card" />
+            <Title>{text("documents.title")}</Title>
+            <Copy muted>{text("documents.requested_by", { verifier })}</Copy>
+            {documentsNextKey(info) ? (
+              <Copy small muted>{text(documentsNextKey(info)!)}</Copy>
+            ) : null}
             {info.custom_message ? (
               <View style={[ui.panel, { backgroundColor: p.soft }]}>
                 <Copy>{info.custom_message}</Copy>
@@ -320,18 +356,19 @@ export function CredflareVerification({
                         },
                       ]}
                     >
+                      <SpecIcon name="document" color={p.primary} />
                       <View style={ui.optionBody}>
                         <Text style={[ui.subtitle, { color: p.ink }]}>
                           {doc.document_type.name}
                         </Text>
-                        <Copy small muted style={{ textAlign: "left" }}>
+                        <Copy small muted>
                           {supported
                             ? methodSummary(doc)
-                            : `Not available in this app. Contact ${verifier}.`}
+                            : text("documents.unavailable", { verifier })}
                         </Copy>
                       </View>
                       {supported && (
-                        <Text style={[ui.chevron, { color: p.muted }]}>›</Text>
+                        <SpecIcon name="chevron_right" color={p.muted} />
                       )}
                     </Pressable>
                   );
@@ -344,10 +381,10 @@ export function CredflareVerification({
       </ScrollView>
       <ConfirmSheet
         visible={confirmExit}
-        title="Leave for now?"
-        body="Evidence you already sent is kept. Unsent photos and files will be discarded. You can return through the requesting app."
-        stay="Keep going"
-        leave="Leave for now"
+        title={text("exit.title")}
+        body={text("exit.body")}
+        stay={text("exit.stay")}
+        leave={text("exit.leave")}
         onStay={() => setConfirmExit(false)}
         onLeave={() => {
           setConfirmExit(false);
@@ -357,10 +394,10 @@ export function CredflareVerification({
       />
       <ConfirmSheet
         visible={confirmDiscard}
-        title="Discard these photos and files?"
-        body="You have not sent this document yet."
-        stay="Keep editing"
-        leave="Discard"
+        title={text("exit.discard_title")}
+        body={text("exit.discard_body")}
+        stay={text("exit.discard_stay")}
+        leave={text("exit.discard_leave")}
         onStay={() => setConfirmDiscard(false)}
         onLeave={() => {
           setConfirmDiscard(false);

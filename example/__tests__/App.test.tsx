@@ -38,12 +38,12 @@ test('starts a combined flow without session entry and opens the camera step', a
     });
   };
   expect(renderer!.root.findAllByType(TextInput)).toHaveLength(0);
-  await press('Start verification');
+  await press('Start');
   expect(JSON.parse(fetcher.mock.calls[0][1]!.body as string).mode).toBeUndefined();
   expect(
     renderer!.root
       .findAllByType(Text)
-      .some(n => n.props.children === 'Start verification'),
+      .some(n => n.props.children === 'Follow the steps requested by your verifier. Review each item before you send it.'),
   ).toBe(false);
   const texts = () => renderer!.root.findAllByType(Text).map(n => n.props.children);
   expect(texts()).toContain(fixture.data.requester.name);

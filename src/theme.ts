@@ -1,34 +1,14 @@
 import { StyleSheet } from "react-native";
-export const palettes = {
-  light: {
-    primary: "#20315F",
-    onPrimary: "#FFFFFF",
-    surface: "#FFFFFF",
-    ink: "#18233C",
-    muted: "#52617A",
-    soft: "#F0F3FA",
-    border: "#CAD4E5",
-    accent: "#DC6E11",
-    success: "#126749",
-    error: "#AA2525",
-    warningSoft: "#FDF1E6",
-    warningInk: "#7A3B06",
-  },
-  dark: {
-    primary: "#B9CDFF",
-    onPrimary: "#16294E",
-    surface: "#111C31",
-    ink: "#F4F7FE",
-    muted: "#B7C4DA",
-    soft: "#1A2942",
-    border: "#566983",
-    accent: "#FFB579",
-    success: "#8FE0B8",
-    error: "#FFB4AB",
-    warningSoft: "#3A2A1A",
-    warningInk: "#FFD3AE",
-  },
-};
+import { tokens } from "@credflare/sdk-javascript";
+const camel = (name: string) => name.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
+function palette(source: Readonly<Record<string, string>>) {
+  const out = Object.fromEntries(Object.entries(source).map(([key, value]) => [camel(key), value]));
+  return out as {
+    primary: string; onPrimary: string; surface: string; ink: string; muted: string; soft: string;
+    border: string; accent: string; success: string; error: string; warningSoft: string; warningInk: string;
+  };
+}
+export const palettes = { light: palette(tokens.color.light), dark: palette(tokens.color.dark) };
 export type Palette = typeof palettes.light;
 export const ui = StyleSheet.create({
   root: { flex: 1 },
@@ -91,10 +71,10 @@ export const ui = StyleSheet.create({
     lineHeight: 24,
     textAlign: "center",
   },
-  small: { fontFamily: "Ubuntu-Regular", fontSize: 13, lineHeight: 19 },
-  eyebrow: { fontFamily: "Ubuntu-Medium", fontSize: 13, lineHeight: 18 },
-  title: { fontFamily: "Ubuntu-Bold", fontSize: 24, lineHeight: 30 },
-  subtitle: { fontFamily: "Ubuntu-Medium", fontSize: 17, lineHeight: 24 },
+  small: { fontFamily: "Ubuntu-Regular", fontSize: tokens.type.small.size, lineHeight: tokens.type.small.line_height, textAlign: "center" },
+  eyebrow: { fontFamily: "Ubuntu-Medium", fontSize: tokens.type.eyebrow.size, lineHeight: tokens.type.eyebrow.line_height, textAlign: "center" },
+  title: { fontFamily: "Ubuntu-Bold", fontSize: tokens.type.title.size, lineHeight: tokens.type.title.line_height, textAlign: "center" },
+  subtitle: { fontFamily: "Ubuntu-Medium", fontSize: tokens.type.subtitle.size, lineHeight: tokens.type.subtitle.line_height, textAlign: "center" },
   brandText: { fontFamily: "Ubuntu-Bold", fontSize: 22 },
   button: {
     minHeight: 56,
@@ -107,8 +87,8 @@ export const ui = StyleSheet.create({
     justifyContent: "center",
     borderWidth: 1,
   },
-  buttonText: { fontFamily: "Ubuntu-Medium", fontSize: 16, lineHeight: 22 },
-  ghost: { minHeight: 48, paddingVertical: 12, justifyContent: "center" },
+  buttonText: { fontFamily: "Ubuntu-Medium", fontSize: tokens.type.button.size, lineHeight: tokens.type.button.line_height, textAlign: "center" },
+  ghost: { minHeight: tokens.size.link_height, paddingVertical: 12, justifyContent: "center", alignItems: "center" },
   progress: { gap: 8 },
   progressTrack: { height: 4, borderRadius: 4, overflow: "hidden" },
   progressFill: { height: 4 },
@@ -130,23 +110,23 @@ export const ui = StyleSheet.create({
   },
   flex: { flex: 1 },
   section: { gap: 10 },
-  sectionLabel: { fontFamily: "Ubuntu-Medium", fontSize: 14, lineHeight: 20 },
+  sectionLabel: { fontFamily: "Ubuntu-Medium", fontSize: tokens.type.label.size, lineHeight: tokens.type.label.line_height, textAlign: "center" },
   option: {
     paddingVertical: 16,
     paddingHorizontal: 18,
     borderWidth: 1,
     borderRadius: 14,
-    flexDirection: "row",
+    flexDirection: "column",
     alignItems: "center",
-    gap: 12,
-    minHeight: 72,
+    gap: 8,
+    minHeight: tokens.size.option_height,
   },
-  optionBody: { flex: 1, gap: 2 },
+  optionBody: { gap: 2, alignItems: "center" },
   chevron: { fontFamily: "Ubuntu-Regular", fontSize: 24, lineHeight: 28 },
   panel: { padding: 16, borderRadius: 14 },
   illustration: {
     height: 88,
-    alignItems: "flex-start",
+    alignItems: "center",
     justifyContent: "center",
   },
   documentShape: {
@@ -198,6 +178,11 @@ export const ui = StyleSheet.create({
   cardStripe: { height: 14, marginHorizontal: -12, opacity: 0.5 },
   cardBarcode: { height: 18, flexDirection: "row", gap: 2, opacity: 0.6 },
   sectionGap: { height: 8 },
+  camera: { width: "100%", aspectRatio: 3 / 4, maxHeight: 460, borderRadius: tokens.radius.xl, overflow: "hidden", alignSelf: "center" },
+  oval: { position: "absolute", top: "12%", bottom: "12%", left: "18%", right: "18%", borderWidth: 3, borderRadius: 999 },
+  recording: { position: "absolute", top: 8, alignSelf: "center", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999 },
+  infoCard: { borderWidth: 1, borderRadius: tokens.radius.lg, padding: 16, gap: 4, alignItems: "center" },
+  hint: { fontFamily: "Ubuntu-Medium", fontSize: tokens.type.subtitle.size, lineHeight: tokens.type.subtitle.line_height, textAlign: "center", minHeight: tokens.type.subtitle.line_height * 2 },
   notice: { padding: 14, borderWidth: 1, borderRadius: 12 },
   modalGround: { flex: 1, justifyContent: "flex-end" },
   modalScrim: {

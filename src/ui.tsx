@@ -9,7 +9,10 @@ import {
   useColorScheme,
 } from "react-native";
 import type { TextProps } from "react-native";
+import { text } from "@credflare/sdk-javascript";
+import type { IconName } from "@credflare/sdk-javascript";
 import { palettes, ui } from "./theme";
+import { SpecIcon } from "./icon";
 export function usePalette() {
   return useColorScheme() === "dark" ? palettes.dark : palettes.light;
 }
@@ -104,13 +107,22 @@ export function Link({
 export function Notice({ children }: { children: string }) {
   const p = usePalette();
   return (
-    <Copy
+    <View
       accessibilityRole="alert"
       accessibilityLiveRegion="polite"
-      style={[ui.notice, { borderColor: p.error, color: p.error }]}
+      style={[ui.notice, { borderColor: p.error, alignItems: "center", gap: 6 }]}
     >
-      {children}
-    </Copy>
+      <SpecIcon name="error" color={p.error} />
+      <Copy style={{ color: p.error }}>{children}</Copy>
+    </View>
+  );
+}
+export function Illustration({ name }: { name: IconName }) {
+  const p = usePalette();
+  return (
+    <View accessible={false} style={ui.illustration}>
+      <SpecIcon name={name} color={p.primary} size={name === "received_illustration" ? 64 : 40} />
+    </View>
   );
 }
 export function BrandHeader() {
@@ -161,12 +173,12 @@ export function VerifierHeader({
         {sandbox && (
           <View style={[ui.chip, { backgroundColor: p.warningSoft }]}>
             <Text style={[ui.chipText, { color: p.warningInk }]}>
-              Test mode
+              {text("common.test_mode")}
             </Text>
           </View>
         )}
       </View>
-      <Link title="Close" onPress={onClose} disabled={disabled} />
+      <Link title={text("common.close")} onPress={onClose} disabled={disabled} />
     </View>
   );
 }
@@ -180,34 +192,13 @@ export function SecuredBy() {
         style={ui.footerMark}
       />
       <Text style={[ui.small, { color: p.muted, fontSize: 12 }]}>
-        Secured by Credflare
+        {text("common.secured_by")}
       </Text>
     </View>
   );
 }
 export function DocumentIllustration() {
-  const p = usePalette();
-  return (
-    <View accessible={false} style={ui.illustration}>
-      <View
-        style={[
-          ui.documentShape,
-          { borderColor: p.primary, backgroundColor: p.soft },
-        ]}
-      >
-        <View
-          style={[ui.documentLine, { backgroundColor: p.accent, width: "50%" }]}
-        />
-        <View style={[ui.documentLine, { backgroundColor: p.primary }]} />
-        <View
-          style={[
-            ui.documentLine,
-            { backgroundColor: p.primary, width: "70%" },
-          ]}
-        />
-      </View>
-    </View>
-  );
+  return <Illustration name="document" />;
 }
 export function SideGuide({ side }: { side: "front" | "back" }) {
   const p = usePalette();

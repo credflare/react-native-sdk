@@ -38,9 +38,9 @@
 		<true/>
 	</dict>
 	<key>NSCameraUsageDescription</key>
-	<string>Capture documents and a selfie requested by your verifier.</string>
+	<string>Capture documents, the movements and the selfie requested by your verifier.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string></string>
+	<string>Share where you are right now when your verifier asks for it.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Select document images for your verification.</string>
 	<key>RCTNewArchEnabled</key>
