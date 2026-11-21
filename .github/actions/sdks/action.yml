@@ -1,0 +1,33 @@
+name: JavaScript SDK and packages
+description: Checks out the JavaScript SDK beside this repository and installs both
+runs:
+  using: composite
+  steps:
+    - id: ref
+      shell: bash
+      env:
+        BRANCH: ${{ github.head_ref || github.ref_name }}
+      run: |
+        if git ls-remote --exit-code --heads https://github.com/credflare/javascript-sdk.git "$BRANCH" > /dev/null; then
+          echo "ref=$BRANCH" >> "$GITHUB_OUTPUT"
+        else
+          echo "ref=main" >> "$GITHUB_OUTPUT"
+        fi
+    - uses: actions/checkout@v4
+      with:
+        repository: credflare/javascript-sdk
+        ref: ${{ steps.ref.outputs.ref }}
+        path: javascript-sdk
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '26'
+        cache: npm
+        cache-dependency-path: |
+          react-native-sdk/package-lock.json
+          javascript-sdk/package-lock.json
+    - shell: bash
+      run: npm ci
+      working-directory: javascript-sdk
+    - shell: bash
+      run: npm ci
+      working-directory: react-native-sdk

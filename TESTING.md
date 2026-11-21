@@ -1,17 +1,27 @@
 # Development test coverage
 
-Date: 2026-11-20. Host: macOS 26.3, Apple Silicon. React Native 0.88.1, React 19.3.0, Node 26.0.0, Xcode 26.6, JDK 17.
+Date: 2026-11-21. Host: macOS 26.3, Apple Silicon. React Native 0.88.1, React 19.3.0, Node 26.0.0, JDK 17.
 
-| Check | Result |
-| --- | --- |
-| TypeScript check | Passed |
-| Automatic session handoff, guided camera step and theme contrast | 2 passed |
-| iOS JavaScript release bundle | Passed |
-| iOS simulator native build | Passed |
-| iOS launch on iPhone 17 Pro, iOS 26.5 | Passed |
-| Android native build with NDK 28.2 | Passed |
-| Android launch on Desk_Pixel_9_API_35 | Passed |
+| Check | Command | Result |
+| --- | --- | --- |
+| JavaScript SDK build, TypeScript check, lint and screen tests | `npm run validate` | 12 passed |
+| Generated spec and fixtures match `../sdk-spec` | `npm run check:spec` | Passed |
+| Android native build with NDK 28.2 | `./gradlew assembleDebug` in `example/android` | Passed |
+| iOS simulator build with Xcode 26.6 | `pod install`, then `xcodebuild` for the iOS Simulator with `CODE_SIGNING_ALLOWED=NO` in `example/ios` | Passed |
 
-The iOS example uses one React version across the app, renderer and SDK. Native camera, document file selection and random-value modules are linked into the example app. The demo requests its session automatically when Start is pressed.
+The screen tests render the guided flow against an API double that answers with the contract fixtures from `sdk-spec`:
 
-Outstanding coverage: native camera and gallery selection, permission denial/restoration, background and process recovery, real-device upload interruptions, full requirement navigation, and end-to-end submission from a device to the API. No physical device is connected. Liveness, trusted-camera and deepfake detection are unavailable and have not been tested.
+- Liveness: a replay face provider feeds the spec traces for the gestures in the server challenge. The test checks that recording starts with the first gesture, a frame is saved per gesture in order, the video and selfie are uploaded with the challenge ID, and the facial submission carries the file IDs and engine results. Further tests check that a timeout offers a retry that requests a new challenge, that a used challenge rejected by code restarts with a new challenge, that a rejection leaving the challenge valid shows the server reason, and that a send which never reached the server keeps the uploads and retries with the same request key.
+- Location: a replaced locator returns a weak fix three times, then a good one. The test checks the reference place copy, the low accuracy retry, an accuracy rejection and a place rejection matched by code, a new request key per attempt and the submitted contract fields, then the receipt. Further tests check that a mock fix is refused on the device without a request, and that a send which never reached the server retries with the same request key.
+- Documents list: the line naming the following in app steps.
+- Native position mapping to `provider` and `is_mock` on Android and iOS.
+
+Android emulator run (Desk_Pixel_9_API_35, Android 15) against the local API:
+
+- ML Kit signs, on a portrait turned to the subject's own right and looking down: yaw -26.8 and pitch -3.9; on its mirror image yaw +28.1 and pitch -3.3. This matches the contract (yaw positive toward the person's own left, pitch positive when tilting up), so ML Kit angles are passed through unchanged.
+- Liveness with the emulator's virtual camera: camera permission, preview and recording indicator work, and ML Kit reports about ten samples a second with no face, so the flow shows the positioning hint and then the timeout retry.
+- With face samples replayed from the spec traces over the real camera, the server challenge completed with real gesture frames, video and selfie, and the facial submission was accepted.
+- Location with an emulator fix at the reference place: permission, a 5 m fix and a submission the server matched to the place, then the receipt.
+- A mock location from a test provider is refused on the device before sending.
+
+Outstanding coverage: no iOS physical device run. Liveness checks show that the camera saw a server chosen sequence in time; they do not prove a live person or detect deepfakes.

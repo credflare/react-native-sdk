@@ -12,6 +12,7 @@ import {
   capturePolicy,
   captureSteps,
   CredflareSession,
+  text,
 } from "@credflare/sdk-javascript";
 import type {
   CaptureSource,
@@ -44,7 +45,7 @@ export function formatSize(bytes: number): string {
   return `${Number((bytes / 1048576).toFixed(1))} MB`;
 }
 const sourceName = (source: CaptureSource) =>
-  source === "camera" ? "Camera photo" : "Saved file";
+  text(source === "camera" ? "capture.source_camera" : "capture.source_upload");
 export function CredflareDocumentCapture({
   session,
   requirement,
@@ -74,9 +75,9 @@ export function CredflareDocumentCapture({
   } catch {
     return (
       <Notice>
-        {`This document cannot be collected in this app. Contact ${
-          requesterName ?? "your verifier"
-        }.`}
+        {text("errors.document_unsupported", {
+          verifier: requesterName ?? text("common.verifier_fallback"),
+        })}
       </Notice>
     );
   }
@@ -105,16 +106,12 @@ export function CredflareDocumentCapture({
         });
         if (result.didCancel) return;
         if (result.errorCode === "permission")
-          throw new Error(
-            "Camera access is off. Turn it on in Settings, then try again."
-          );
+          throw new Error(text("errors.camera_denied"));
         if (result.errorCode)
-          throw new Error(
-            "The camera is unavailable. Try again on a device with a camera."
-          );
+          throw new Error(text("errors.camera_unavailable"));
         const asset = result.assets?.[0];
         if (!asset?.uri || !asset.fileName)
-          throw new Error("The camera did not return a photo. Try again.");
+          throw new Error(text("errors.camera_no_photo"));
         file = {
           uri: asset.uri,
           name: asset.fileName,
@@ -138,7 +135,7 @@ export function CredflareDocumentCapture({
           allowVirtualFiles: false,
         });
         if (result.error || !result.name || !result.hasRequestedType)
-          throw new Error("This file could not be read. Choose another file.");
+          throw new Error(text("errors.file_unreadable"));
         file = {
           uri: result.uri,
           name: result.name,
@@ -149,13 +146,13 @@ export function CredflareDocumentCapture({
       const ext = file.name.split(".").pop()?.toLowerCase();
       if (!ext || !allowedFileTypes.includes(ext === "jpeg" ? "jpg" : ext))
         throw new Error(
-          `Choose a ${allowedFileTypes.join(", ").toUpperCase()} file.`
+          text("errors.file_type", {
+            types: allowedFileTypes.join(", ").toUpperCase(),
+          })
         );
       if (file.size !== undefined && file.size > maxFileSizeBytes)
         throw new Error(
-          `This file is larger than ${formatSize(
-            maxFileSizeBytes
-          )}. Choose a smaller file.`
+          text("errors.file_too_large", { size: formatSize(maxFileSizeBytes) })
         );
       setCaptures((value) => ({
         ...value,
@@ -171,7 +168,7 @@ export function CredflareDocumentCapture({
       setError(
         cause instanceof Error
           ? cause.message
-          : "Could not add this file. Try again."
+          : text("errors.add_file_failed")
       );
     } finally {
       toggle(false);
@@ -196,8 +193,8 @@ export function CredflareDocumentCapture({
           done += 1;
           setSending(
             uploads.length > 1
-              ? `Uploading ${done} of ${uploads.length}`
-              : "Uploading"
+              ? text("sending.uploading_progress", { current: done, total: uploads.length })
+              : text("sending.uploading")
           );
           const form = new FormData();
           form.append("side", item.side);
@@ -216,7 +213,7 @@ export function CredflareDocumentCapture({
           source: file.source,
         });
       }
-      setSending("Sending");
+      setSending(text("sending.sending"));
       const result = await session.submit(
         {
           type: "document_verification",
@@ -230,7 +227,7 @@ export function CredflareDocumentCapture({
       setError(
         cause instanceof CredflareError && cause.status !== 0
           ? cause.message
-          : "Could not send this document. Check your connection and try again."
+          : text("errors.send_document_failed")
       );
     } finally {
       setSending(undefined);
@@ -248,13 +245,13 @@ export function CredflareDocumentCapture({
         {file.mime.startsWith("image/") ? (
           <Image
             source={{ uri: file.uri }}
-            accessibilityLabel={`${label} preview`}
+            accessibilityLabel={text("capture.preview_label", { side: label.toLowerCase() })}
             style={ui.image}
           />
         ) : (
           <>
             <Text style={[ui.subtitle, { color: p.ink }]}>
-              {file.mime === "application/pdf" ? "PDF" : "Document"}
+              {file.mime === "application/pdf" ? text("capture.preview_pdf") : text("capture.preview_document")}
             </Text>
             <Copy small muted numberOfLines={2} style={{ textAlign: "center" }}>
               {file.name}
@@ -269,32 +266,28 @@ export function CredflareDocumentCapture({
     capturePolicy(requirement) === "snapshot_and_upload" &&
     step?.source === "upload" &&
     steps.findIndex((item) => item.source === "upload") === index;
-  const side = step?.side ?? "front";
   const instruction = !step
     ? ""
     : step.source === "camera"
-    ? "Place the document on a flat surface. Keep all four corners visible and avoid reflections."
+    ? text("capture.instruction_camera", { document: requirement.document_type.name })
     : step.source === "upload"
-    ? `Choose a clear ${
-        allowedFileTypes.includes("pdf") ? "photo, scan or PDF" : "photo or scan"
-      } of the ${side}.${
-        firstUpload
-          ? ` ${requesterName ?? "Your verifier"} also needs a saved file of each side.`
-          : ""
-      }`
-    : `Take a photo or choose a saved file of the ${side}.`;
+    ? `${text(
+        allowedFileTypes.includes("pdf") ? "capture.instruction_upload_pdf" : "capture.instruction_upload",
+        { side: step.label.toLowerCase() }
+      )}${firstUpload ? ` ${text("capture.also_saved_file")}` : ""}`
+    : text("capture.instruction_either", { side: step.label.toLowerCase() });
   return (
     <View style={{ gap: 16 }}>
       <View style={{ gap: 4 }}>
         <Text style={[ui.eyebrow, { color: p.muted }]}>
           {requirement.document_type.name}
         </Text>
-        <Title>{reviewing ? "Review before sending" : step!.label}</Title>
+        <Title>{reviewing ? text("review.title") : step!.label}</Title>
         {!reviewing && <Copy muted>{step!.sourceLabel}</Copy>}
       </View>
       <View
         accessibilityRole="progressbar"
-        accessibilityLabel={`Step ${position} of ${total}`}
+        accessibilityLabel={text("common.step_progress", { current: position, total })}
         accessibilityValue={{ min: 0, max: total, now: position }}
         style={ui.progress}
       >
@@ -310,17 +303,14 @@ export function CredflareDocumentCapture({
           />
         </View>
         <Copy small muted>
-          Step {position} of {total}
+          {text("common.step_progress", { current: position, total })}
         </Copy>
       </View>
       {!reviewing ? (
         selected ? (
           <>
             {preview(selected, step!.label)}
-            <Copy muted>
-              Check that all four corners are visible, the text is sharp and
-              there is no glare.
-            </Copy>
+            <Copy muted>{text("capture.check_photo")}</Copy>
             {selected.source === "upload" && (
               <Copy small muted numberOfLines={1}>
                 {selected.name}
@@ -330,17 +320,17 @@ export function CredflareDocumentCapture({
             <View style={ui.row}>
               <Link
                 title={
-                  selected.source === "camera" ? "Retake photo" : "Change file"
+                  selected.source === "camera" ? text("capture.retake_photo") : text("capture.change_file")
                 }
                 disabled={busy}
                 onPress={() => select(step!, selected.source)}
               />
-              {step!.source === "either" && (
+              {step!.source === "camera_or_upload" && (
                 <Link
                   title={
                     selected.source === "camera"
-                      ? "Use a file instead"
-                      : "Take a photo instead"
+                      ? text("capture.use_file_instead")
+                      : text("capture.use_photo_instead")
                   }
                   disabled={busy}
                   onPress={() =>
@@ -354,7 +344,7 @@ export function CredflareDocumentCapture({
             </View>
             <Action
               title={
-                editing || index + 1 === steps.length ? "Review" : "Continue"
+                editing || index + 1 === steps.length ? text("review.title") : text("common.continue")
               }
               onPress={next}
               disabled={busy}
@@ -367,38 +357,37 @@ export function CredflareDocumentCapture({
             {error && <Notice>{error}</Notice>}
             {step!.source !== "upload" && (
               <Action
-                title="Take photo"
+                title={text("capture.take_photo")}
                 disabled={busy}
                 onPress={() => select(step!, "camera")}
               />
             )}
             {canUpload && (
               <Action
-                title="Choose a file"
-                secondary={step!.source === "either"}
+                title={text("capture.choose_file")}
+                secondary={step!.source === "camera_or_upload"}
                 disabled={busy}
                 onPress={() => select(step!, "upload")}
               />
             )}
             {canUpload && (
               <Copy small muted style={{ textAlign: "center" }}>
-                {allowedFileTypes.join(", ").toUpperCase()}, up to{" "}
-                {formatSize(maxFileSizeBytes)}
+                {text("capture.file_limits", { types: allowedFileTypes.join(", ").toUpperCase(), size: formatSize(maxFileSizeBytes) })}
               </Copy>
             )}
           </>
         )
       ) : (
         <>
-          <Copy muted>Check each photo and file before you send them.</Copy>
+          <Copy muted>{text("review.body")}</Copy>
           {steps.map((item) => (
             <View key={item.id} style={{ gap: 4 }}>
               <View style={ui.row}>
                 <Text style={[ui.subtitle, ui.flex, { color: p.ink }]}>
-                  {item.label} · {sourceName(captures[item.id]!.source)}
+                  {text("review.item", { side: item.label, source: sourceName(captures[item.id]!.source) })}
                 </Text>
                 <Link
-                  title="Change"
+                  title={text("review.change")}
                   disabled={busy}
                   onPress={() => {
                     setIndex(steps.indexOf(item));
@@ -418,11 +407,11 @@ export function CredflareDocumentCapture({
               accessibilityLiveRegion="polite"
               style={{ textAlign: "center" }}
             >
-              {sending}…
+              {sending}
             </Copy>
           )}
           <Action
-            title="Send document"
+            title={text("review.send")}
             onPress={send}
             loading={busy}
           />
