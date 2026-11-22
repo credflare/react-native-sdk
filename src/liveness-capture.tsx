@@ -2,10 +2,10 @@ import React, { useEffect, useRef, useState } from "react";
 import { Image, Text, View } from "react-native";
 import {
   CredflareError,
-  challengeRejected,
   createChallengeRun,
   facialSettings,
   livenessErrorMessage,
+  rejectionScreen,
   sendLivenessEvidence,
   text,
   verifierName,
@@ -17,12 +17,14 @@ import type {
   GestureEvidence,
   LivenessChallenge,
   LivenessEvidence,
+  RejectionScreen,
   SessionInfo,
 } from "@credflare/sdk-javascript";
 import type { CapturedFile, LivenessCameraHandle, NativeFaceProvider } from "./liveness-camera";
 import { requestKey } from "./request-key";
 import { Action, Copy, Link, Notice, Title, usePalette } from "./ui";
 import { SpecIcon } from "./icon";
+import { RejectionPanel } from "./rejection-panel";
 import { ui } from "./theme";
 
 type Phase = "intro" | "starting" | "running" | "selfie" | "review" | "failed";
@@ -45,6 +47,7 @@ export function CredflareLiveness({ session, info, provider, onSubmitted, onBusy
   const [tracked, setTracked] = useState(false);
   const [recording, setRecording] = useState(false);
   const [error, setError] = useState<string>();
+  const [rejection, setRejection] = useState<RejectionScreen>();
   const [status, setStatus] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [selfie, setSelfie] = useState<CapturedFile>();
@@ -69,7 +72,7 @@ export function CredflareLiveness({ session, info, provider, onSubmitted, onBusy
     setBusy(value);
     onBusyChanged?.(value);
   }
-  function fail(message: string) {
+  function fail(message: string, screen?: RejectionScreen) {
     const current = run.current;
     if (current) current.finished = true;
     void camera.current?.stopRecording().catch(() => null);
@@ -77,12 +80,14 @@ export function CredflareLiveness({ session, info, provider, onSubmitted, onBusy
     if (!mounted.current) return;
     setRecording(false);
     setError(message);
+    setRejection(screen);
     setPhase("failed");
     working(false);
   }
   async function start() {
     working(true);
     setError(undefined);
+    setRejection(undefined);
     setPhase("starting");
     evidence.current = null;
     setSelfie(undefined);
@@ -95,6 +100,7 @@ export function CredflareLiveness({ session, info, provider, onSubmitted, onBusy
     try {
       challenge = await session.createLivenessChallenge(requestKey());
     } catch (cause) {
+      if (cause instanceof CredflareError && cause.status === 422) return fail(cause.message, rejectionScreen(cause, { requester: info.requester }));
       return fail(cause instanceof CredflareError && cause.status !== 0 ? livenessErrorMessage(cause) : text("errors.challenge_failed"));
     }
     if (!mounted.current) return;
@@ -192,7 +198,7 @@ export function CredflareLiveness({ session, info, provider, onSubmitted, onBusy
     } catch (cause) {
       if (!mounted.current) return;
       setStatus(undefined);
-      if (challengeRejected(cause)) return fail(text("liveness.expired"));
+      if (cause instanceof CredflareError && cause.status === 422) return fail(cause.message, rejectionScreen(cause, { requester: info.requester }));
       setError(livenessErrorMessage(cause, text("errors.send_selfie_failed")));
       working(false);
     }
@@ -209,12 +215,18 @@ export function CredflareLiveness({ session, info, provider, onSubmitted, onBusy
           <Title>{text("liveness.title")}</Title>
           <Copy muted>{text("liveness.body", { total: settings?.gesture_count ?? 3 })}</Copy>
           {settings?.record_video !== false ? <Copy small muted>{text("video.consent", { verifier })}</Copy> : null}
-          {error ? <Notice>{error}</Notice> : null}
-          <Action
-            title={phase === "failed" ? text("liveness.retry") : phase === "starting" ? text("selfie.starting_camera") : text("liveness.start")}
-            loading={phase === "starting"}
-            onPress={() => void start()}
-          />
+          {phase === "failed" && rejection ? (
+            <RejectionPanel rejection={rejection} onAction={() => void start()} />
+          ) : (
+            <>
+              {error ? <Notice>{error}</Notice> : null}
+              <Action
+                title={phase === "failed" ? text("liveness.retry") : phase === "starting" ? text("selfie.starting_camera") : text("liveness.start")}
+                loading={phase === "starting"}
+                onPress={() => void start()}
+              />
+            </>
+          )}
           {privacy}
         </>
       ) : null}

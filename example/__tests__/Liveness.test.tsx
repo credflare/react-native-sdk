@@ -87,9 +87,11 @@ test('a used challenge rejected by code restarts with a new challenge', async ()
   await press('Take selfie');
   await waitFor(() => texts().includes('Send selfie'), 'review');
   await press('Send selfie');
-  await waitFor(() => texts().includes('This step timed out. Start it again.'), 'restart prompt');
+  await waitFor(() => texts().includes(text('rejection.liveness_restart.message')), 'restart prompt');
+  expect(texts()).toContain(text('rejection.liveness_restart.title'));
+  expect(texts()).toContain(text('rejection.requested_by', { verifier: fixture('capture-session').data.requester.name }));
   expect(texts()).not.toContain(fixture('rejections/liveness.challenge_used').message);
-  await press('Try again');
+  await press(text('rejection.action.restart'));
   await waitFor(() => api.calls.filter(call => call.url.endsWith('/liveness-challenges')).length === 2, 'new challenge');
   await ReactTestRenderer.act(async () => renderer!.unmount());
 }, 60000);
@@ -129,13 +131,15 @@ test('a send that never reached the server keeps the uploads and retries the sub
   await unmount();
 }, 60000);
 
-test('a rejection that leaves the challenge valid shows the server reason without a new challenge', async () => {
+test('a gesture mismatch shows the shared rejection copy and starts again with a new challenge', async () => {
   const api = fakeApi({ facialRejections: ['rejections/liveness.gesture_mismatch'] });
   const { texts, press, waitFor, unmount } = await reachReview(api);
   await press('Send selfie');
-  const reason = fixture('rejections/liveness.gesture_mismatch').message;
-  await waitFor(() => texts().includes(reason), 'server reason');
-  expect(texts()).not.toContain(text('liveness.expired'));
+  await waitFor(() => texts().includes(text('rejection.gesture_mismatch.message')), 'rejection copy');
+  expect(texts()).toContain(text('rejection.gesture_mismatch.title'));
+  expect(texts()).not.toContain(fixture('rejections/liveness.gesture_mismatch').message);
   expect(api.calls.filter(call => call.url.endsWith('/liveness-challenges'))).toHaveLength(1);
+  await press(text('rejection.action.restart'));
+  await waitFor(() => api.calls.filter(call => call.url.endsWith('/liveness-challenges')).length === 2, 'new challenge');
   await unmount();
 }, 60000);

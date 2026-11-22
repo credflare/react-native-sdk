@@ -10,16 +10,17 @@ import {
   location as locationSpec,
   locationCopy,
   locationErrorKey,
-  locationRejection,
   locationSettings,
   locationSubmission,
+  rejectionScreen,
   text,
   verifierName,
 } from "@credflare/sdk-javascript";
-import type { CredflareSession, LocationFix, SessionInfo } from "@credflare/sdk-javascript";
+import type { CredflareSession, LocationFix, RejectionScreen, SessionInfo } from "@credflare/sdk-javascript";
 import { requestKey } from "./request-key";
 import { Action, Copy, Link, Notice, Title, usePalette } from "./ui";
 import { SpecIcon } from "./icon";
+import { RejectionPanel } from "./rejection-panel";
 import { ui } from "./theme";
 
 export interface Locator {
@@ -89,6 +90,7 @@ export function CredflareLocation({
   const [waiting, setWaiting] = useState(text("location.waiting"));
   const [fix, setFix] = useState<LocationFix>();
   const [error, setError] = useState<string>();
+  const [rejection, setRejection] = useState<RejectionScreen>();
   const [busy, setBusy] = useState(false);
   const submitKey = useRef(requestKey());
   function working(value: boolean) {
@@ -99,6 +101,7 @@ export function CredflareLocation({
     if (busy) return;
     working(true);
     setError(undefined);
+    setRejection(undefined);
     try {
       if (!(await locator.requestPermission())) throw new LocationError("permission_denied");
       setWaiting(text("location.waiting"));
@@ -125,12 +128,16 @@ export function CredflareLocation({
       await session.submitLocation(submission, submitKey.current);
       onSubmitted();
     } catch (cause) {
-      if (cause instanceof CredflareError && cause.status === 422) submitKey.current = requestKey();
-      setError(
-        cause instanceof CredflareError && cause.status !== 0
-          ? locationRejection(cause.code, settings) ?? livenessErrorMessage(cause)
-          : text("errors.send_location_failed"),
-      );
+      if (cause instanceof CredflareError && cause.status === 422) {
+        submitKey.current = requestKey();
+        setRejection(rejectionScreen(cause, { requester: info.requester, location: settings }));
+      } else {
+        setError(
+          cause instanceof CredflareError && cause.status !== 0
+            ? livenessErrorMessage(cause)
+            : text("errors.send_location_failed"),
+        );
+      }
     } finally {
       working(false);
     }
@@ -162,9 +169,15 @@ export function CredflareLocation({
             <Copy small muted>{text("location.time_label")}</Copy>
             <Copy>{new Date(fix.fixTime).toLocaleTimeString()}</Copy>
           </View>
-          {error ? <Notice>{error}</Notice> : null}
-          <Action title={text("location.send")} loading={busy} onPress={() => void send()} />
-          <Link title={text("location.retry")} disabled={busy} onPress={() => void locate()} />
+          {rejection ? (
+            <RejectionPanel rejection={rejection} disabled={busy} onAction={() => void locate()} />
+          ) : (
+            <>
+              {error ? <Notice>{error}</Notice> : null}
+              <Action title={text("location.send")} loading={busy} onPress={() => void send()} />
+              <Link title={text("location.retry")} disabled={busy} onPress={() => void locate()} />
+            </>
+          )}
         </>
       ) : null}
     </View>
