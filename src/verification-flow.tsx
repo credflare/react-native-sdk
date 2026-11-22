@@ -14,11 +14,13 @@ import {
   documentsNextKey,
   methodSummary,
   nextStep,
+  receiptKey,
   text,
   verifierName,
 } from "@credflare/sdk-javascript";
 import type {
   DocumentRequirement,
+  FlowStep,
   SessionDescriptor,
   SessionInfo,
 } from "@credflare/sdk-javascript";
@@ -28,6 +30,8 @@ import type { Locator } from "./location-step";
 import { mlKitFaceProvider } from "./liveness-camera";
 import type { NativeFaceProvider } from "./liveness-camera";
 import { CredflareDocumentCapture } from "./document-capture";
+import { CredflareContactCode } from "./contact-code-step";
+import { CredflareQuestionnaire } from "./questionnaire";
 import { SpecIcon } from "./icon";
 import {
   Action,
@@ -162,11 +166,8 @@ export function CredflareVerification({
       setInfo(metadata);
       setPendingReceipt(false);
       if (nextStep(metadata) === "done") onSubmitted?.(metadata);
-    } catch (cause) {
-      if (mounted.current)
-        setError(
-          message(cause, text("errors.refresh_failed")),
-        );
+    } catch {
+      if (mounted.current) setError(text("errors.refresh_failed"));
     } finally {
       active.current = false;
       if (mounted.current) setLoading(false);
@@ -183,6 +184,10 @@ export function CredflareVerification({
   const receive = (label: string) => {
     setReceived(items => [...items, label]);
     void refresh();
+  };
+  const receiveStep = (done: FlowStep) => {
+    const key = receiptKey(done);
+    receive(key ? text(key) : text("receipt.title"));
   };
   useEffect(() => {
     const listener = BackHandler.addEventListener("hardwareBackPress", () => {
@@ -236,7 +241,7 @@ export function CredflareVerification({
             <Title>{text("sending.sent_title")}</Title>
             <Copy muted>{text("sending.sent_body")}</Copy>
             {notice}
-            <Action title={text("sending.check_again")} onPress={refresh} />
+            <Action title={text("common.try_again")} onPress={refresh} />
           </>
         ) : allReceived ? (
           <>
@@ -305,7 +310,7 @@ export function CredflareVerification({
             session={client.current!}
             info={info}
             provider={faceProvider}
-            onSubmitted={() => receive(text("receipt.selfie"))}
+            onSubmitted={() => receiveStep("facial_verification")}
             onBusyChanged={setCaptureBusy}
           />
         ) : step === "location_verification" ? (
@@ -313,7 +318,25 @@ export function CredflareVerification({
             session={client.current!}
             info={info}
             locator={locator}
-            onSubmitted={() => receive(text("receipt.location"))}
+            onSubmitted={() => receiveStep("location_verification")}
+            onBusyChanged={setCaptureBusy}
+          />
+        ) : step === "questions" ? (
+          <CredflareQuestionnaire
+            key={JSON.stringify(info.profile?.form_schema)}
+            session={client.current!}
+            info={info}
+            onSubmitted={() => receiveStep("questions")}
+            onBusyChanged={setCaptureBusy}
+          />
+        ) : step === "email_verification" || step === "phone_verification" ? (
+          <CredflareContactCode
+            key={step}
+            session={client.current!}
+            info={info}
+            channel={step === "email_verification" ? "email" : "phone"}
+            onSubmitted={() => receiveStep(step)}
+            onLeave={onClose}
             onBusyChanged={setCaptureBusy}
           />
         ) : (

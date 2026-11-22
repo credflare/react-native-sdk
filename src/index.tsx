@@ -1,10 +1,12 @@
-export { CredflareSession } from "@credflare/sdk-javascript";
+export { CredflareSession, isShown, visibleQuestions } from "@credflare/sdk-javascript";
 export type {
   SessionDescriptor,
   SessionInfo,
   DocumentRequirement,
   FaceSample,
   LocationFix,
+  Question,
+  ShowIf,
 } from "@credflare/sdk-javascript";
 export { requestKey } from "./request-key";
 export { useCredflareSession } from "./use-session";
@@ -20,3 +22,8 @@ export { CredflareLocation, nativeLocator, positionToFix } from "./location-step
 export type { Locator } from "./location-step";
 export { normalizeMlKitFaces } from "./mlkit";
 export { SpecIcon } from "./icon";
+export { CredflareContactCode } from "./contact-code-step";
+export type { ContactCodeProps } from "./contact-code-step";
+export { CredflareQuestionnaire } from "./questionnaire";
+export type { QuestionnaireProps } from "./questionnaire";
+export { RejectionPanel } from "./rejection-panel";
