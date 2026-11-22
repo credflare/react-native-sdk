@@ -21,9 +21,19 @@ jobs:
         with:
           path: react-native-sdk
       - uses: ./react-native-sdk/.github/actions/sdks
+      - id: spec
+        env:
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: |
+          if git ls-remote --exit-code --heads https://github.com/credflare/sdk-spec.git "$BRANCH" > /dev/null; then
+            echo "ref=$BRANCH" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=main" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/checkout@v4
         with:
           repository: credflare/sdk-spec
+          ref: ${{ steps.spec.outputs.ref }}
           path: sdk-spec
       - run: npm run check:spec
         working-directory: react-native-sdk
