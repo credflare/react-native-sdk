@@ -52,6 +52,7 @@ export interface VerificationProps {
   onClose: () => void;
   onSubmitted?: (info: SessionInfo) => void;
   onCancelled?: () => void;
+  onHostActionRequired?: (details: { code: string | null }) => void;
   autoStart?: boolean;
   faceProvider?: NativeFaceProvider;
   locator?: Locator;
@@ -94,6 +95,7 @@ export function CredflareVerification({
   onClose,
   onSubmitted,
   onCancelled,
+  onHostActionRequired,
   autoStart = false,
   faceProvider = mlKitFaceProvider,
   locator,
@@ -111,6 +113,7 @@ export function CredflareVerification({
     [confirmExit, setConfirmExit] = useState(false),
     [confirmDiscard, setConfirmDiscard] = useState(false),
     [pendingReceipt, setPendingReceipt] = useState(false),
+    [closed, setClosed] = useState(false),
     [received, setReceived] = useState<string[]>([]);
   const message = (cause: unknown, fallback: string) =>
     cause instanceof CredflareError
@@ -166,8 +169,13 @@ export function CredflareVerification({
       setInfo(metadata);
       setPendingReceipt(false);
       if (nextStep(metadata) === "done") onSubmitted?.(metadata);
-    } catch {
-      if (mounted.current) setError(text("errors.refresh_failed"));
+    } catch (cause) {
+      if (!mounted.current) return;
+      if (cause instanceof CredflareError && cause.status === 409) {
+        setClosed(true);
+        setPendingReceipt(false);
+        if (info) onSubmitted?.(info);
+      } else setError(text("errors.refresh_failed"));
     } finally {
       active.current = false;
       if (mounted.current) setLoading(false);
@@ -179,8 +187,16 @@ export function CredflareVerification({
   }
   const verifier = verifierName(info);
   const docs = info?.profile?.document_requirements ?? [];
-  const step = info ? nextStep(info) : null;
+  const step = closed ? "done" : info ? nextStep(info) : null;
   const allReceived = !pendingReceipt && (step === "done" || step === "host");
+  const finish = () => {
+    if (step === "host") onHostActionRequired?.({ code: null });
+    onClose();
+  };
+  const leave = (code: string | null) => {
+    onHostActionRequired?.({ code });
+    onClose();
+  };
   const receive = (label: string) => {
     setReceived(items => [...items, label]);
     void refresh();
@@ -192,13 +208,13 @@ export function CredflareVerification({
   useEffect(() => {
     const listener = BackHandler.addEventListener("hardwareBackPress", () => {
       if (!loading && !captureBusy) {
-        if (allReceived) onClose();
+        if (allReceived) finish();
         else setConfirmExit(true);
       }
       return true;
     });
     return () => listener.remove();
-  }, [allReceived, loading, captureBusy, onClose]);
+  }, [allReceived, loading, captureBusy, finish]);
   const notice = error ? <Notice>{error}</Notice> : null;
   return (
     <View style={[ui.root, { backgroundColor: p.surface }]}>
@@ -206,7 +222,7 @@ export function CredflareVerification({
         name={info?.requester?.name}
         logoUrl={info?.requester?.logo_url}
         sandbox={info?.environment === "sandbox"}
-        onClose={allReceived ? onClose : () => setConfirmExit(true)}
+        onClose={allReceived ? finish : () => setConfirmExit(true)}
         disabled={loading || captureBusy}
       />
       <ScrollView
@@ -269,7 +285,7 @@ export function CredflareVerification({
                   ? text("common.return_to_app")
                   : text("receipt.done")
               }
-              onPress={onClose}
+              onPress={finish}
             />
           </>
         ) : document ? (
@@ -336,7 +352,7 @@ export function CredflareVerification({
             info={info}
             channel={step === "email_verification" ? "email" : "phone"}
             onSubmitted={() => receiveStep(step)}
-            onLeave={onClose}
+            onLeave={leave}
             onBusyChanged={setCaptureBusy}
           />
         ) : (

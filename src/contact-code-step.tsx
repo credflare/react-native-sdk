@@ -28,7 +28,7 @@ export interface ContactCodeProps {
   info: SessionInfo;
   channel: CodeChannel;
   onSubmitted: () => void;
-  onLeave: () => void;
+  onLeave: (code: string | null) => void;
   onBusyChanged?: (busy: boolean) => void;
 }
 
@@ -125,7 +125,7 @@ export function CredflareContactCode({ session, info, channel, onSubmitted, onLe
   function act(screen: RejectionScreen) {
     switch (screen.action) {
       case "leave":
-        return onLeave();
+        return onLeave(screen.code);
       case "new_code":
       case "wait":
         return void send();

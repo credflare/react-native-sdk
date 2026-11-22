@@ -41,9 +41,10 @@ test.each(codes)('%s shows the shared copy and its action', async code => {
   });
   global.fetch = api.fetcher as unknown as typeof fetch;
   const onClose = jest.fn();
+  const onHostActionRequired = jest.fn();
   let renderer: ReactTestRenderer.ReactTestRenderer;
   await ReactTestRenderer.act(async () => {
-    renderer = ReactTestRenderer.create(<CredflareVerification autoStart onClose={onClose} sessionProvider={descriptor} />);
+    renderer = ReactTestRenderer.create(<CredflareVerification autoStart onClose={onClose} onHostActionRequired={onHostActionRequired} sessionProvider={descriptor} />);
   });
   const { texts, press, pressLast, waitFor } = helpers(() => renderer!);
   const { type, field } = inputs(() => renderer!);
@@ -70,6 +71,7 @@ test.each(codes)('%s shows the shared copy and its action', async code => {
   switch (copy.action) {
     case 'leave':
       await pressLast(text('rejection.action.leave'));
+      expect(onHostActionRequired).toHaveBeenCalledWith({ code });
       expect(onClose).toHaveBeenCalledTimes(1);
       break;
     case 'wait': {

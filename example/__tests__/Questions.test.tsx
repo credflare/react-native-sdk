@@ -146,3 +146,26 @@ test('a refused answer without a code shows the server message and stays on the 
   expect(texts()).toContain(text('questions.send'));
   await view.unmount();
 }, 60000);
+
+test('a case the server closed after the last submission shows the receipt', async () => {
+  const api = contactApi({ sessions: [fixture('requirement-added-session')], closedGets: [2] });
+  global.fetch = api.fetcher as unknown as typeof fetch;
+  const onSubmitted = jest.fn();
+  let renderer: ReactTestRenderer.ReactTestRenderer;
+  await ReactTestRenderer.act(async () => {
+    renderer = ReactTestRenderer.create(<CredflareVerification autoStart onClose={() => {}} onSubmitted={onSubmitted} sessionProvider={descriptor} />);
+  });
+  const { texts, press, waitFor } = helpers(() => renderer!);
+  const { type } = inputs(() => renderer!);
+  await waitFor(() => texts().includes(text('phone.title')), 'phone step');
+  await type(text('phone.label'), '+237650000001');
+  await press(text('phone.send'));
+  await waitFor(() => texts().includes(text('contact_code.title')), 'code entry');
+  await type(text('contact_code.label'), '123456');
+  await press(text('contact_code.confirm'));
+  await waitFor(() => texts().includes(text('receipt.title')), 'receipt');
+  expect(texts()).toContain(text('receipt.phone'));
+  expect(texts()).not.toContain(text('errors.refresh_failed'));
+  expect(onSubmitted).toHaveBeenCalledTimes(1);
+  await ReactTestRenderer.act(async () => renderer!.unmount());
+}, 60000);

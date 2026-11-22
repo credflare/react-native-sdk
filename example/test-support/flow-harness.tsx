@@ -158,7 +158,7 @@ export const completed = (name: string) => {
   return { ...base, data: { ...base.data, status: 'in_progress', profile: { ...base.data.profile, form_schema: null, verification_requirements: [], document_requirements: [] } } };
 };
 
-export function contactApi(options: { sessions: unknown[]; submits?: string[]; codes?: string[]; confirms?: string[]; failedGets?: number[] }) {
+export function contactApi(options: { sessions: unknown[]; submits?: string[]; codes?: string[]; confirms?: string[]; failedGets?: number[]; closedGets?: number[] }) {
   const calls: Call[] = [];
   const submits = [...(options.submits ?? [])];
   const codes = [...(options.codes ?? [])];
@@ -176,6 +176,7 @@ export function contactApi(options: { sessions: unknown[]; submits?: string[]; c
     if (method === 'GET') {
       state.gets += 1;
       if (options.failedGets?.includes(state.gets)) throw new TypeError('Network request failed');
+      if (options.closedGets?.includes(state.gets)) return json(409, fixture('session-closed'));
       return json(200, options.sessions[Math.min(state.stage, options.sessions.length - 1)]);
     }
     const channel = url.match(/\/(email|phone)-codes(\/confirm)?$/);
