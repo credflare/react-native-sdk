@@ -40,6 +40,7 @@ export interface DocumentCaptureProps {
   onBusyChanged?: (busy: boolean) => void;
   onDirtyChanged?: (dirty: boolean) => void;
   requesterName?: string;
+  onClosed?: () => void;
 }
 export function formatSize(bytes: number): string {
   return `${Number((bytes / 1048576).toFixed(1))} MB`;
@@ -55,6 +56,7 @@ export function CredflareDocumentCapture({
   onBusyChanged,
   onDirtyChanged,
   requesterName,
+  onClosed,
 }: DocumentCaptureProps) {
   const p = usePalette();
   const [captures, setCaptures] = useState<Record<string, Capture>>({});
@@ -224,6 +226,7 @@ export function CredflareDocumentCapture({
       );
       onSubmitted(result.id);
     } catch (cause) {
+      if (cause instanceof CredflareError && cause.status === 409 && onClosed) return onClosed();
       setError(
         cause instanceof CredflareError && cause.status !== 0
           ? cause.message

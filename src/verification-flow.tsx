@@ -332,6 +332,7 @@ export function CredflareVerification({
               requesterName={info.requester?.name}
               maxFileSizeBytes={info.upload_limits.max_file_size_bytes}
               allowedFileTypes={info.upload_limits.allowed_file_types}
+              onClosed={markClosed}
               onSubmitted={() =>
                 receive(
                   text("receipt.document", {
