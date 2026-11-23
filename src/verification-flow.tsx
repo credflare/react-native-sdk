@@ -14,7 +14,7 @@ import {
   documentsNextKey,
   earlierAnswers,
   methodSummary,
-  nextStep,
+  remainingStep,
   receiptKey,
   text,
   verifierName,
@@ -22,7 +22,7 @@ import {
 import type {
   Answers,
   DocumentRequirement,
-  FlowStep,
+  RemainingStep,
   SessionDescriptor,
   SessionInfo,
 } from "@credflare/sdk-javascript";
@@ -176,7 +176,7 @@ export function CredflareVerification({
       if (!mounted.current) return;
       setInfo(metadata);
       setPendingReceipt(false);
-      if (nextStep(metadata, earlierAnswers(metadata, { ...answered.current, ...unsent.current })) === "done") onSubmitted?.(metadata);
+      if (remainingStep(metadata, known(metadata)) === "done") onSubmitted?.(metadata);
     } catch (cause) {
       if (!mounted.current) return;
       if (cause instanceof CredflareError && cause.status === 409) {
@@ -187,6 +187,13 @@ export function CredflareVerification({
       if (mounted.current) setLoading(false);
     }
   }
+  function known(metadata: SessionInfo): Answers {
+    return { ...earlierAnswers(metadata, answered.current), ...unsent.current };
+  }
+  const handOver = useCallback((answers: Answers) => {
+    unsent.current = answers;
+    setHandedBack(count => count + 1);
+  }, []);
   function markClosed() {
     setClosed(true);
     setPendingReceipt(false);
@@ -199,7 +206,7 @@ export function CredflareVerification({
   }
   const verifier = verifierName(info);
   const docs = info?.profile?.document_requirements ?? [];
-  const step = closed ? "done" : info ? nextStep(info, earlierAnswers(info, { ...answered.current, ...unsent.current })) : null;
+  const step = closed ? "done" : info ? remainingStep(info, known(info)) : null;
   const allReceived = !pendingReceipt && (step === "done" || step === "host");
   const finish = () => {
     if (step === "host") onHostActionRequired?.({ code: null });
@@ -214,7 +221,7 @@ export function CredflareVerification({
     setReceived(items => [...items, label]);
     void refresh();
   };
-  const receiveStep = (done: FlowStep) => {
+  const receiveStep = (done: RemainingStep) => {
     const key = receiptKey(done);
     receive(key ? text(key) : text("receipt.title"));
   };
@@ -365,10 +372,9 @@ export function CredflareVerification({
               unsent.current = {};
               receiveStep("questions");
             }}
-            onUnsupported={answers => {
-              unsent.current = answers;
-              setHandedBack(count => count + 1);
-            }}
+            onUnsupported={handOver}
+            onLeave={leave}
+            onRejection={screen => setLeaveCode(screen?.action === "leave" ? screen.code : undefined)}
             onClosed={markClosed}
             onBusyChanged={setCaptureBusy}
           />

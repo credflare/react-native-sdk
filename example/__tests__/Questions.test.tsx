@@ -323,3 +323,100 @@ test('fuzzy conditions work without TextEncoder', async () => {
     globalThis.TextEncoder = encoder;
   }
 }, 60000);
+
+test('changing an earlier answer so it reveals a question the SDK cannot ask hands the form to the host once', async () => {
+  const onHostActionRequired = jest.fn();
+  const revealing = withSchema([asked('employment'), { ...asked('employer'), type: 'signature' }]);
+  const session = { ...revealing, data: { ...revealing.data, profile: { ...revealing.data.profile, verification_requirements: [], form_answers: { employment: 'Student' } } } };
+  const api = contactApi({ sessions: [session] });
+  global.fetch = api.fetcher as unknown as typeof fetch;
+  const onClose = jest.fn();
+  let renderer: ReactTestRenderer.ReactTestRenderer;
+  await ReactTestRenderer.act(async () => {
+    renderer = ReactTestRenderer.create(<CredflareVerification autoStart onClose={onClose} onHostActionRequired={onHostActionRequired} sessionProvider={descriptor} />);
+  });
+  const { texts, press, waitFor } = helpers(() => renderer!);
+  await waitFor(() => texts().includes(text('questions.title')), 'questionnaire');
+  await press('Employed');
+  await waitFor(() => texts().includes(text('common.return_to_app')), 'host hand back');
+  expect(texts()).toContain(text('receipt.host_steps'));
+  expect(api.calls.filter(call => call.url.endsWith('/submit'))).toHaveLength(0);
+  await press(text('common.return_to_app'));
+  expect(onHostActionRequired).toHaveBeenCalledWith({ code: null });
+  expect(onClose).toHaveBeenCalledTimes(1);
+  await ReactTestRenderer.act(async () => renderer!.unmount());
+}, 30000);
+
+test('an optional country or single choice asked again can be cleared and is sent as null', async () => {
+  const country = { ...asked('country'), required: false, show_if: null };
+  const employment = { ...asked('employment'), required: false, show_if: null };
+  const form = withSchema([country, employment]);
+  const api = contactApi({ sessions: [{ ...form, data: { ...form.data, profile: { ...form.data.profile, form_answers: { country: 'DE', employment: 'Student' } } } }, completed('questionnaire-session')] });
+  const view = await open(api);
+  await view.waitFor(() => view.texts().includes('Germany'), 'prefilled country');
+  const remove = text('questions.founders_remove');
+  expect(view.texts().filter(value => value === remove)).toHaveLength(2);
+  await view.press(remove);
+  expect(view.texts()).not.toContain('Germany');
+  expect(view.texts()).toContain(text('questions.choose_country'));
+  await view.press(remove);
+  expect(view.texts()).not.toContain(remove);
+  await view.press(text('questions.send'));
+  await view.waitFor(() => view.texts().includes(text('receipt.title')), 'receipt');
+  expect(api.calls.find(call => call.url.endsWith('/submit'))!.body).toEqual({ type: 'form_submission', fields: { country: null, employment: null } });
+  await view.unmount();
+}, 30000);
+
+test('a required choice offers no way to clear it', async () => {
+  const form = withSchema([{ ...asked('employment'), required: true, show_if: null }]);
+  const api = contactApi({ sessions: [{ ...form, data: { ...form.data, profile: { ...form.data.profile, form_answers: { employment: 'Student' } } } }] });
+  const view = await open(api);
+  await view.waitFor(() => view.texts().includes(text('questions.title')), 'questionnaire');
+  expect(view.texts()).not.toContain(text('questions.founders_remove'));
+  await view.unmount();
+}, 30000);
+
+test('Leave on a questionnaire rejection hands back to the host with the rejection code', async () => {
+  const onHostActionRequired = jest.fn();
+  const onCancelled = jest.fn();
+  const onClose = jest.fn();
+  const api = contactApi({ sessions: [withSchema([asked('employment')])], submits: ['rejections/phone.not_configured'] });
+  global.fetch = api.fetcher as unknown as typeof fetch;
+  let renderer: ReactTestRenderer.ReactTestRenderer;
+  await ReactTestRenderer.act(async () => {
+    renderer = ReactTestRenderer.create(<CredflareVerification autoStart onClose={onClose} onCancelled={onCancelled} onHostActionRequired={onHostActionRequired} sessionProvider={descriptor} />);
+  });
+  const { texts, press, pressLast, waitFor } = helpers(() => renderer!);
+  await waitFor(() => texts().includes(text('questions.title')), 'questionnaire');
+  await press('Student');
+  await press(text('questions.send'));
+  await waitFor(() => texts().includes(text('rejection.phone_not_configured.title', { verifier })), 'rejection');
+  await pressLast(text('rejection.action.leave'));
+  expect(onHostActionRequired).toHaveBeenCalledWith({ code: 'phone.not_configured' });
+  expect(onCancelled).not.toHaveBeenCalled();
+  expect(onClose).toHaveBeenCalledTimes(1);
+  await ReactTestRenderer.act(async () => renderer!.unmount());
+}, 30000);
+
+test('closing from a questionnaire rejection reports its code, never a cancellation', async () => {
+  const onHostActionRequired = jest.fn();
+  const onCancelled = jest.fn();
+  const onClose = jest.fn();
+  const api = contactApi({ sessions: [withSchema([asked('employment')])], submits: ['rejections/phone.not_configured'] });
+  global.fetch = api.fetcher as unknown as typeof fetch;
+  let renderer: ReactTestRenderer.ReactTestRenderer;
+  await ReactTestRenderer.act(async () => {
+    renderer = ReactTestRenderer.create(<CredflareVerification autoStart onClose={onClose} onCancelled={onCancelled} onHostActionRequired={onHostActionRequired} sessionProvider={descriptor} />);
+  });
+  const { texts, press, waitFor } = helpers(() => renderer!);
+  await waitFor(() => texts().includes(text('questions.title')), 'questionnaire');
+  await press('Student');
+  await press(text('questions.send'));
+  await waitFor(() => texts().includes(text('rejection.phone_not_configured.title', { verifier })), 'rejection');
+  await press(text('common.close'));
+  await press(text('exit.leave'));
+  expect(onHostActionRequired).toHaveBeenCalledWith({ code: 'phone.not_configured' });
+  expect(onCancelled).not.toHaveBeenCalled();
+  expect(onClose).toHaveBeenCalledTimes(1);
+  await ReactTestRenderer.act(async () => renderer!.unmount());
+}, 30000);

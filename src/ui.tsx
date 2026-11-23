@@ -79,15 +79,18 @@ export function Link({
   title,
   onPress,
   disabled = false,
+  accessibilityLabel,
 }: {
   title: string;
   onPress: () => void;
   disabled?: boolean;
+  accessibilityLabel?: string;
 }) {
   const p = usePalette();
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
       accessibilityState={{ disabled }}
       disabled={disabled}
       onPress={onPress}

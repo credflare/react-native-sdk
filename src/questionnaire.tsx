@@ -31,6 +31,8 @@ export interface QuestionnaireProps {
   earlier?: Answers;
   onUnsupported?: (answers: Answers) => void;
   onClosed?: () => void;
+  onLeave?: (code: string | null) => void;
+  onRejection?: (rejection: RejectionScreen | null) => void;
 }
 
 const signedNumberKeyboard: KeyboardTypeOptions = Platform.OS === "ios" ? "numbers-and-punctuation" : "numeric";
@@ -54,7 +56,7 @@ function serverFieldErrors(errors: unknown): Record<string, string> {
   return out;
 }
 
-export function CredflareQuestionnaire({ session, info, onSubmitted, onBusyChanged, earlier: local, onUnsupported, onClosed }: QuestionnaireProps) {
+export function CredflareQuestionnaire({ session, info, onSubmitted, onBusyChanged, earlier: local, onUnsupported, onClosed, onLeave, onRejection }: QuestionnaireProps) {
   const p = usePalette();
   const verifier = verifierName(info);
   const schema = (info.profile?.form_schema ?? []) as Question[];
@@ -62,7 +64,7 @@ export function CredflareQuestionnaire({ session, info, onSubmitted, onBusyChang
   const [answers, setAnswers] = useState<Answers>(() => startingAnswers(schema, earlier));
   const [checked, setChecked] = useState(false);
   const [serverErrors, setServerErrors] = useState<Record<string, string>>({});
-  const [rejection, setRejection] = useState<RejectionScreen>();
+  const [rejection, showRejection] = useState<RejectionScreen>();
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [picking, setPicking] = useState<Question>();
@@ -70,10 +72,20 @@ export function CredflareQuestionnaire({ session, info, onSubmitted, onBusyChang
   const visible = visibleQuestions(schema, answers, earlier);
   const unsupported = !visible.every(isSupportedQuestion);
   const shown = visible.filter(isSupportedQuestion);
+  const handOver = useRef(onUnsupported);
+  handOver.current = onUnsupported;
   useEffect(() => {
-    if (unsupported) onUnsupported?.(answers);
-  }, [unsupported, answers, onUnsupported]);
+    if (unsupported) handOver.current?.(answers);
+  }, [unsupported, answers]);
   const problems = checked ? answerProblems(schema, answers, earlier) : {};
+  function setRejection(screen: RejectionScreen | undefined) {
+    showRejection(screen);
+    onRejection?.(screen ?? null);
+  }
+  function act(screen: RejectionScreen) {
+    if (screen.action === "leave" && onLeave) return onLeave(screen.code);
+    setRejection(undefined);
+  }
   function working(value: boolean) {
     setBusy(value);
     onBusyChanged?.(value);
@@ -225,10 +237,12 @@ export function CredflareQuestionnaire({ session, info, onSubmitted, onBusyChang
       default:
         control = typed("default");
     }
+    const clearable = !question.required && typeof value === "string" && ["select", "single_select", "country"].includes(question.type);
     return (
       <View key={question.key} style={ui.field}>
         {question.type === "consent" ? null : label}
         {control}
+        {clearable ? <Link title={text("questions.founders_remove")} accessibilityLabel={`${text("questions.founders_remove")}: ${question.label}`} disabled={busy} onPress={() => answer(question, null)} /> : null}
         {problem ? <Text style={[ui.small, { color: p.error }]}>{problem}</Text> : null}
       </View>
     );
@@ -243,7 +257,7 @@ export function CredflareQuestionnaire({ session, info, onSubmitted, onBusyChang
       {unsupported ? (
         <Notice>{text("receipt.host_steps")}</Notice>
       ) : rejection ? (
-        <RejectionPanel rejection={rejection} onAction={() => setRejection(undefined)} />
+        <RejectionPanel rejection={rejection} onAction={() => act(rejection)} />
       ) : (
         <Action title={text("questions.send")} loading={busy} onPress={() => void send()} />
       )}
