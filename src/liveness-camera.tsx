@@ -4,6 +4,7 @@ import {
   Camera,
   CommonResolutions,
   VisionCamera,
+  getCameraDevice,
   usePhotoOutput,
   useVideoOutput,
 } from "react-native-vision-camera";
@@ -33,6 +34,7 @@ export interface NativeFaceProvider {
   name: FaceProviderName;
   Camera: React.ComponentType<LivenessCameraProps>;
   requestPermission: () => Promise<boolean>;
+  isAvailable?: () => Promise<boolean>;
 }
 
 const fileUri = (path: string) => (path.startsWith("file://") ? path : `file://${path}`);
@@ -100,4 +102,5 @@ export const mlKitFaceProvider: NativeFaceProvider = {
   name: "mlkit",
   Camera: MlKitCamera,
   requestPermission: async () => VisionCamera.cameraPermissionStatus === "authorized" || VisionCamera.requestCameraPermission(),
+  isAvailable: async () => getCameraDevice(await VisionCamera.createDeviceFactory(), "front") != null,
 };

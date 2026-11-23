@@ -27,6 +27,31 @@ import { SpecIcon } from "./icon";
 import { RejectionPanel } from "./rejection-panel";
 import { ui } from "./theme";
 
+const captureTimeoutMs = 15000;
+
+function withinCaptureTime<T>(work: Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("capture timed out")), captureTimeoutMs);
+    work.then(
+      value => { clearTimeout(timer); resolve(value); },
+      cause => { clearTimeout(timer); reject(cause); },
+    );
+  });
+}
+
+class CameraBoundary extends React.Component<{ onError: () => void; children: React.ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  componentDidCatch() {
+    this.props.onError();
+  }
+  render() {
+    return this.state.failed ? null : this.props.children;
+  }
+}
+
 type Phase = "intro" | "starting" | "running" | "selfie" | "review" | "failed";
 
 export interface LivenessProps {
@@ -94,6 +119,7 @@ export function CredflareLiveness({ session, info, provider, onSubmitted, onBusy
     setSelfie(undefined);
     try {
       if (!(await provider.requestPermission())) return fail(text("errors.camera_denied"));
+      if (provider.isAvailable && !(await provider.isAvailable())) return fail(text("errors.camera_unavailable"));
     } catch {
       return fail(text("errors.camera_unavailable"));
     }
@@ -124,7 +150,7 @@ export function CredflareLiveness({ session, info, provider, onSubmitted, onBusy
     if (!current) return;
     current.finished = true;
     setRecording(false);
-    const clip = await camera.current?.stopRecording().catch(() => null) ?? null;
+    const clip = camera.current ? await withinCaptureTime(camera.current.stopRecording()).catch(() => null) : null;
     if (outcome !== "pass") return fail(text(outcome === "timeout" ? "liveness.timeout" : "liveness.expired"));
     if (current.challenge.record_video && !clip) return fail(text("errors.camera_unavailable"));
     try {
@@ -154,7 +180,7 @@ export function CredflareLiveness({ session, info, provider, onSubmitted, onBusy
       const pending: GestureEvidence = { gesture: done.gesture, completedAt: Date.now(), key: requestKey(), file: { uri: "", name: "", type: "" } };
       current.gestures.push(pending);
       current.frames.push(
-        camera.current!.takePhoto(done.gesture).then(file => { pending.file = file; }),
+        withinCaptureTime(camera.current!.takePhoto(done.gesture)).then(file => { pending.file = file; }),
       );
     }
     const total = current.challenge.gestures.length;
@@ -168,7 +194,7 @@ export function CredflareLiveness({ session, info, provider, onSubmitted, onBusy
     if (!current || busy) return;
     working(true);
     try {
-      const photo = await camera.current!.takePhoto("selfie");
+      const photo = await withinCaptureTime(camera.current!.takePhoto("selfie"));
       evidence.current = {
         challenge: current.challenge,
         provider: provider.name,
@@ -241,13 +267,15 @@ export function CredflareLiveness({ session, info, provider, onSubmitted, onBusy
           {phase === "selfie" ? <Copy muted>{text("selfie.guidance")}</Copy> : null}
           <View style={[ui.camera, { backgroundColor: p.soft }]}>
             <View style={{ flex: 1 }}>
-              <CameraView
-                active
-                recordVideo={!!run.current?.challenge.record_video}
-                handle={camera}
-                onSample={onSample}
-                onError={() => fail(text("errors.camera_unavailable"))}
-              />
+              <CameraBoundary onError={() => fail(text("errors.camera_unavailable"))}>
+                <CameraView
+                  active
+                  recordVideo={!!run.current?.challenge.record_video}
+                  handle={camera}
+                  onSample={onSample}
+                  onError={() => fail(text("errors.camera_unavailable"))}
+                />
+              </CameraBoundary>
             </View>
             <View pointerEvents="none" style={[ui.oval, { borderColor: tracked || phase === "selfie" ? p.success : p.primary }]} />
             {recording ? (

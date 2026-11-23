@@ -143,3 +143,78 @@ test('a gesture mismatch shows the shared rejection copy and starts again with a
   await waitFor(() => api.calls.filter(call => call.url.endsWith('/liveness-challenges')).length === 2, 'new challenge');
   await unmount();
 }, 60000);
+
+test('a device without a usable front camera gets the camera message instead of a challenge', async () => {
+  const api = fakeApi();
+  global.fetch = api.fetcher as unknown as typeof fetch;
+  const replay = replayProvider(api.gestures);
+  const noCamera = { ...replay, isAvailable: async () => false };
+  let renderer: ReactTestRenderer.ReactTestRenderer;
+  await ReactTestRenderer.act(async () => {
+    renderer = ReactTestRenderer.create(
+      <CredflareVerification autoStart onClose={() => {}} sessionProvider={descriptor} faceProvider={noCamera} />,
+    );
+  });
+  const { texts, press, waitFor } = helpers(() => renderer!);
+  await waitFor(() => texts().includes('Start'), 'intro');
+  await press('Start');
+  await waitFor(() => texts().includes(text('errors.camera_unavailable')), 'camera message');
+  expect(api.calls.filter(call => call.url.endsWith('/liveness-challenges'))).toHaveLength(0);
+  expect(texts()).toContain('Try again');
+  await ReactTestRenderer.act(async () => renderer!.unmount());
+}, 60000);
+
+test('a camera that fails while starting shows the camera message and keeps the step usable', async () => {
+  const api = fakeApi();
+  global.fetch = api.fetcher as unknown as typeof fetch;
+  const replay = replayProvider(api.gestures);
+  function BrokenCamera(): React.ReactElement {
+    throw new Error('Cannot listen to device orientation changes');
+  }
+  const broken = { ...replay, Camera: BrokenCamera };
+  const quiet = jest.spyOn(console, 'error').mockImplementation(() => {});
+  let renderer: ReactTestRenderer.ReactTestRenderer;
+  await ReactTestRenderer.act(async () => {
+    renderer = ReactTestRenderer.create(
+      <CredflareVerification autoStart onClose={() => {}} sessionProvider={descriptor} faceProvider={broken} />,
+    );
+  });
+  const { texts, press, waitFor } = helpers(() => renderer!);
+  await waitFor(() => texts().includes('Start'), 'intro');
+  await press('Start');
+  await waitFor(() => texts().includes(text('errors.camera_unavailable')), 'camera message');
+  expect(texts()).toContain('Follow the prompts');
+  await press('Try again');
+  await waitFor(() => api.calls.filter(call => call.url.endsWith('/liveness-challenges')).length === 2, 'second attempt');
+  await waitFor(() => texts().includes(text('errors.camera_unavailable')), 'camera message again');
+  quiet.mockRestore();
+  await ReactTestRenderer.act(async () => renderer!.unmount());
+}, 60000);
+
+test('a photo that never arrives from the camera ends in the selfie message', async () => {
+  const api = fakeApi();
+  global.fetch = api.fetcher as unknown as typeof fetch;
+  const provider = replayProvider(api.gestures);
+  function StuckCamera(props: LivenessCameraProps) {
+    const handle = React.useRef<LivenessCameraProps['handle']['current']>(null);
+    React.useEffect(() => {
+      const real = handle.current!;
+      props.handle.current = { ...real, takePhoto: name => (name === 'selfie' ? new Promise(() => {}) : real.takePhoto(name)) };
+    });
+    return <provider.Camera {...props} handle={handle} />;
+  }
+  let renderer: ReactTestRenderer.ReactTestRenderer;
+  await ReactTestRenderer.act(async () => {
+    renderer = ReactTestRenderer.create(
+      <CredflareVerification autoStart onClose={() => {}} sessionProvider={descriptor} faceProvider={{ ...provider, Camera: StuckCamera }} />,
+    );
+  });
+  const { texts, press, waitFor } = helpers(() => renderer!);
+  await waitFor(() => texts().includes('Start'), 'intro');
+  await press('Start');
+  await waitFor(() => texts().includes('Take selfie'), 'selfie step', 20000);
+  await press('Take selfie');
+  await waitFor(() => texts().includes(text('errors.selfie_failed')), 'selfie message', 20000);
+  expect(texts()).toContain('Take selfie');
+  await ReactTestRenderer.act(async () => renderer!.unmount());
+}, 60000);
