@@ -18,9 +18,13 @@ const rules = requirements.contact_codes;
 
 interface PendingCode {
   destination: string;
-  typed: string;
+  typed: string | null;
   sends_remaining: number | null;
+  expires_at: number | null;
 }
+
+const field = <T,>(details: Record<string, unknown> | undefined, key: string, type: "string" | "number"): T | null =>
+  details && typeof details[key] === type ? (details[key] as T) : null;
 
 export interface ContactCodeProps {
   session: CredflareSession;
@@ -68,21 +72,28 @@ export function CredflareContactCode({ session, info, channel, onSubmitted, onLe
     setBusy(value);
     onBusyChanged?.(value !== null);
   }
-  function failed(cause: unknown, fallback: CopyKey) {
+  function failed(cause: unknown, fallback: CopyKey, requested?: string) {
     if (cause instanceof CredflareError && cause.status === 409 && onClosed) return onClosed();
     if (cause instanceof CredflareError && cause.status === 422) {
       const screen = rejectionScreen(cause, { requester: info.requester });
       if (screen.action === "wait") {
-        const hinted = typeof cause.details?.resend_available_at === "string" ? Date.parse(cause.details.resend_available_at) : NaN;
+        const hinted = Date.parse(field<string>(cause.details, "resend_available_at", "string") ?? "");
         const at = Date.now();
         setResendAt(current => (!Number.isNaN(hinted) ? hinted : current > at ? current : at + rules.resend_seconds * 1000));
         setNow(Date.now());
-        const elsewhere = !!sent && sent.typed !== destination;
-        if (sent) setDestination(sent.typed);
-        else setSent({ destination: destination.trim(), typed: destination, sends_remaining: null });
+        const asked = requested ?? destination;
+        const masked = field<string>(cause.details, "destination", "string");
+        const expires = Date.parse(field<string>(cause.details, "expires_at", "string") ?? "");
+        const left = field<number>(cause.details, "sends_remaining", "number");
+        const known = sent && (!masked || sent.destination === masked) ? sent : undefined;
+        const pending: PendingCode = masked
+          ? { destination: masked, typed: known?.typed ?? null, sends_remaining: left ?? known?.sends_remaining ?? null, expires_at: Number.isNaN(expires) ? known?.expires_at ?? null : expires }
+          : known ?? { destination: asked.trim(), typed: asked, sends_remaining: null, expires_at: null };
+        setSent(pending);
+        if (pending.typed !== null) setDestination(pending.typed);
         setRejection(undefined);
         setError(screen.message);
-        setNote(elsewhere ? text(channel === "email" ? "email.change_after" : "phone.change_after") : undefined);
+        setNote(pending.typed !== asked ? text(channel === "email" ? "email.change_after" : "phone.change_after") : undefined);
         setPhase("code");
         setTimeout(() => codeInput.current?.focus(), 0);
         return;
@@ -107,7 +118,8 @@ export function CredflareContactCode({ session, info, channel, onSubmitted, onLe
     try {
       const next: CodeRequest = await session.requestCode(channel, channel === "phone" ? normalizePhone(value) : value.trim());
       if (!mounted.current) return;
-      setSent({ destination: next.destination, typed: value, sends_remaining: next.sends_remaining });
+      const expires = Date.parse(next.expires_at);
+      setSent({ destination: next.destination, typed: value, sends_remaining: next.sends_remaining, expires_at: Number.isNaN(expires) ? null : expires });
       setNote(undefined);
       const ready = Date.parse(next.resend_available_at);
       setResendAt(Number.isNaN(ready) ? Date.now() + rules.resend_seconds * 1000 : ready);
@@ -116,7 +128,7 @@ export function CredflareContactCode({ session, info, channel, onSubmitted, onLe
       setRejection(undefined);
       setPhase("code");
     } catch (cause) {
-      if (mounted.current) failed(cause, "errors.send_code_failed");
+      if (mounted.current) failed(cause, "errors.send_code_failed", value);
     } finally {
       if (mounted.current) working(null);
     }
@@ -156,6 +168,7 @@ export function CredflareContactCode({ session, info, channel, onSubmitted, onLe
     }
   }
   const inputStyle = [ui.input, { borderColor: p.border, color: p.ink, backgroundColor: p.surface }];
+  const minutes = sent?.expires_at ? Math.max(1, Math.ceil((sent.expires_at - now) / 60000)) : rules.ttl_minutes;
   const canResend = !!sent && (sent.sends_remaining === null || sent.sends_remaining > 0);
   const resendLine = canResend
     ? waiting > 0
@@ -203,7 +216,7 @@ export function CredflareContactCode({ session, info, channel, onSubmitted, onLe
         </>
       ) : (
         <>
-          <Copy muted>{text("contact_code.body", { destination: sent?.destination ?? "", minutes: rules.ttl_minutes })}</Copy>
+          <Copy muted>{text("contact_code.body", { destination: sent?.destination ?? "", minutes })}</Copy>
           <View style={ui.field}>
             <Text style={[ui.sectionLabel, { color: p.muted }]}>{text("contact_code.label")}</Text>
             <TextInput
@@ -223,7 +236,7 @@ export function CredflareContactCode({ session, info, channel, onSubmitted, onLe
             />
           </View>
           {error ? <Notice>{error}</Notice> : null}
-          {note ? <Copy small muted>{note}</Copy> : null}
+          {note && waiting > 0 ? <Copy small muted>{note}</Copy> : null}
           {busy === "confirming" ? <Copy small muted accessibilityLiveRegion="polite">{text("contact_code.confirming")}</Copy> : null}
           <Action
             title={text("contact_code.confirm")}

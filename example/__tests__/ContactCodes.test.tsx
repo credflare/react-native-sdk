@@ -196,23 +196,52 @@ test('leaving a leave rejection by the header close reports the rejection code, 
   await view.unmount();
 }, 30000);
 
-test('a resend rejection without a code on screen lets the applicant type the code they already have', async () => {
+test('a resend refusal after the earlier send was lost shows the code entry for the destination the server names', async () => {
   const rejection = fixture('rejections/phone.resend_too_soon');
   fakeNow(Date.parse(rejection.resend_available_at) - 30000);
   try {
     const api = contactApi({ sessions: [session('phone'), { ...session('phone'), data: { ...session('phone').data, profile: { ...session('phone').data.profile, verification_requirements: [] } } }], codes: ['rejections/phone.resend_too_soon'] });
     const view = await openFlow(api);
     await view.waitFor(() => view.texts().includes(text('phone.title')), 'destination');
-    await view.type(text('phone.label'), '+237 650 000 001');
+    await view.type(text('phone.label'), '+237 650 000 009');
     await view.press(text('phone.send'));
     await view.waitFor(() => view.texts().includes(text('contact_code.title')), 'code entry');
+    const minutes = Math.ceil((Date.parse(rejection.expires_at) - Date.now()) / 60000);
     expect(view.texts()).toContain(text('rejection.code_resend_too_soon.message', { verifier }));
-    expect(view.texts()).toContain(text('contact_code.body', { destination: '+237 650 000 001', minutes: requirements.contact_codes.ttl_minutes }));
+    expect(view.texts()).toContain(text('contact_code.body', { destination: rejection.destination, minutes }));
     expect(view.texts()).toContain(text('contact_code.resend_in', { seconds: 30 }));
+    expect(view.texts()).toContain(text('contact_code.sends_remaining', { count: rejection.sends_remaining }));
+    expect(view.texts()).toContain(text('phone.change_after'));
+    expect(view.texts().join(' ')).not.toContain('650 000 009');
     await view.type(text('contact_code.label'), '123456');
     await view.press(text('contact_code.confirm'));
     await view.waitFor(() => view.texts().includes(text('receipt.title')), 'receipt');
     expect(api.calls.find(call => call.url.endsWith('/phone-codes/confirm'))!.body).toEqual({ code: '123456' });
+    await view.unmount();
+  } finally {
+    jest.useRealTimers();
+  }
+}, 30000);
+
+test('a resend refusal names the destination the server reports, not the one this screen sent last', async () => {
+  const rejection = fixture('rejections/email.resend_too_soon');
+  fakeNow(Date.parse(rejection.resend_available_at) - 20000);
+  try {
+    const api = contactApi({ sessions: [session('email')], codes: ['email-code-request', 'rejections/email.resend_too_soon'] });
+    const view = await openFlow(api);
+    await view.waitFor(() => view.texts().includes(text('email.title')), 'destination');
+    await view.type(text('email.label'), 'jane.doe@example.test');
+    await view.press(text('email.send'));
+    await view.waitFor(() => view.texts().includes(text('contact_code.title')), 'code entry');
+    await view.press(text('email.change'));
+    await view.type(text('email.label'), 'other@example.test');
+    await view.press(text('email.send'));
+    await view.waitFor(() => view.texts().includes(text('email.change_after')), 'note');
+    const sent = fixture('email-code-request').data;
+    expect(sent.destination).not.toBe(rejection.destination);
+    expect(view.texts()).toContain(text('contact_code.body', { destination: rejection.destination, minutes: Math.ceil((Date.parse(rejection.expires_at) - Date.now()) / 60000) }));
+    expect(view.texts().join(' ')).not.toContain(sent.destination);
+    expect(view.texts().join(' ')).not.toContain('other@example.test');
     await view.unmount();
   } finally {
     jest.useRealTimers();
