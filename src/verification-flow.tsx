@@ -240,6 +240,8 @@ export function CredflareVerification({
       />
       <ScrollView
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
+        automaticallyAdjustKeyboardInsets
         contentContainerStyle={ui.page}
       >
         {loading ? (

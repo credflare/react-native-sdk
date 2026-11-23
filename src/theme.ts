@@ -22,7 +22,7 @@ export const ui = StyleSheet.create({
     flexGrow: 1,
   },
   header: {
-    paddingHorizontal: 24,
+    paddingHorizontal: 16,
     paddingVertical: 8,
     minHeight: 56,
     flexDirection: "row",
@@ -32,11 +32,18 @@ export const ui = StyleSheet.create({
   },
   brand: { flexDirection: "row", alignItems: "center", gap: 10 },
   mark: { width: 30, height: 30 },
+  headerSide: { width: 72, alignItems: "flex-end" },
   verifier: {
     flex: 1,
+    alignItems: "center",
+    gap: 4,
+  },
+  verifierRow: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
     gap: 8,
+    maxWidth: "100%",
   },
   verifierLogo: { height: 24, width: 24, borderRadius: 6 },
   verifierName: {
@@ -44,6 +51,7 @@ export const ui = StyleSheet.create({
     fontSize: 15,
     lineHeight: 20,
     flexShrink: 1,
+    textAlign: "center",
   },
   chip: {
     paddingHorizontal: 8,
@@ -102,13 +110,7 @@ export const ui = StyleSheet.create({
     padding: 12,
   },
   image: { height: "100%", width: "100%", resizeMode: "contain" },
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 16,
-  },
-  flex: { flex: 1 },
+  links: { alignItems: "center" },
   section: { gap: 10 },
   sectionLabel: { fontFamily: "Ubuntu-Medium", fontSize: tokens.type.label.size, lineHeight: tokens.type.label.line_height, textAlign: "center" },
   option: {

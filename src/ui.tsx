@@ -156,19 +156,22 @@ export function VerifierHeader({
   const p = usePalette();
   return (
     <View style={ui.header}>
+      <View style={ui.headerSide} />
       <View style={ui.verifier}>
-        {logoUrl ? (
-          <Image
-            source={{ uri: logoUrl }}
-            accessibilityIgnoresInvertColors
-            resizeMode="contain"
-            style={ui.verifierLogo}
-          />
-        ) : null}
-        {name ? (
-          <Text numberOfLines={1} style={[ui.verifierName, { color: p.ink }]}>
-            {name}
-          </Text>
+        {logoUrl || name ? (
+          <View style={ui.verifierRow}>
+            {logoUrl ? (
+              <Image
+                source={{ uri: logoUrl }}
+                accessibilityIgnoresInvertColors
+                resizeMode="contain"
+                style={ui.verifierLogo}
+              />
+            ) : null}
+            {name ? (
+              <Text style={[ui.verifierName, { color: p.ink }]}>{name}</Text>
+            ) : null}
+          </View>
         ) : null}
         {sandbox && (
           <View style={[ui.chip, { backgroundColor: p.warningSoft }]}>
@@ -178,7 +181,9 @@ export function VerifierHeader({
           </View>
         )}
       </View>
-      <Link title={text("common.close")} onPress={onClose} disabled={disabled} />
+      <View style={ui.headerSide}>
+        <Link title={text("common.close")} onPress={onClose} disabled={disabled} />
+      </View>
     </View>
   );
 }

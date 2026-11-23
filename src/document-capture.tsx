@@ -317,7 +317,7 @@ export function CredflareDocumentCapture({
               </Copy>
             )}
             {error && <Notice>{error}</Notice>}
-            <View style={ui.row}>
+            <View style={ui.links}>
               <Link
                 title={
                   selected.source === "camera" ? text("capture.retake_photo") : text("capture.change_file")
@@ -382,21 +382,19 @@ export function CredflareDocumentCapture({
           <Copy muted>{text("review.body")}</Copy>
           {steps.map((item) => (
             <View key={item.id} style={{ gap: 4 }}>
-              <View style={ui.row}>
-                <Text style={[ui.subtitle, ui.flex, { color: p.ink }]}>
-                  {text("review.item", { side: item.label, source: sourceName(captures[item.id]!.source) })}
-                </Text>
-                <Link
-                  title={text("review.change")}
-                  disabled={busy}
-                  onPress={() => {
-                    setIndex(steps.indexOf(item));
-                    setEditing(true);
-                    setError(undefined);
-                  }}
-                />
-              </View>
+              <Text style={[ui.subtitle, { color: p.ink }]}>
+                {text("review.item", { side: item.label, source: sourceName(captures[item.id]!.source) })}
+              </Text>
               {preview(captures[item.id]!, item.label, true)}
+              <Link
+                title={text("review.change")}
+                disabled={busy}
+                onPress={() => {
+                  setIndex(steps.indexOf(item));
+                  setEditing(true);
+                  setError(undefined);
+                }}
+              />
             </View>
           ))}
           {error && <Notice>{error}</Notice>}

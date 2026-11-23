@@ -308,7 +308,7 @@ function CountrySheet({ question, onPick, onClose }: { question?: Question; onPi
   const needle = filter.trim().toLowerCase();
   const list = needle ? all.filter(item => item.name.toLowerCase().includes(needle) || item.code.toLowerCase() === needle) : all;
   return (
-    <Modal visible={!!question} animationType="slide" onRequestClose={onClose}>
+    <Modal visible={!!question} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <View style={[ui.root, { backgroundColor: p.surface, padding: 24, gap: 12 }]}>
         <Text accessibilityRole="header" style={[ui.subtitle, { color: p.ink }]}>
           {text("questions.choose_country")}
