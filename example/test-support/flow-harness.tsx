@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { Text } from 'react-native';
 import ReactTestRenderer from 'react-test-renderer';
 import { Response } from 'whatwg-fetch';
+import { requirements } from '@credflare/sdk-javascript';
 import type {
   FaceSample,
   LivenessCameraProps,
@@ -141,5 +142,82 @@ export function helpers(renderer: () => ReactTestRenderer.ReactTestRenderer) {
     }
     throw new Error(`Timed out waiting for ${label}: ${texts().join(' | ')}`);
   };
-  return { texts, press, waitFor };
+  const pressLast = async (label: string) => {
+    const found = renderer().root.findAllByType(Text).filter(node => node.props.children === label);
+    if (!found.length) throw new Error(`No ${label} in ${texts().join(' | ')}`);
+    let node = found[found.length - 1].parent!;
+    while (!node.props.onPress) node = node.parent!;
+    await ReactTestRenderer.act(async () => {
+      await node.props.onPress();
+    });
+  };
+  return { texts, press, pressLast, waitFor };
+}
+
+export const completed = (name: string) => {
+  const base = fixture(name);
+  return { ...base, data: { ...base.data, status: 'in_progress', profile: { ...base.data.profile, form_schema: null, verification_requirements: [], document_requirements: [] } } };
+};
+
+export function contactApi(options: { sessions: unknown[]; submits?: string[]; codes?: string[]; confirms?: string[]; failedGets?: number[]; closedGets?: number[]; statuses?: Record<string, number> }) {
+  const calls: Call[] = [];
+  const submits = [...(options.submits ?? [])];
+  const codes = [...(options.codes ?? [])];
+  const confirms = [...(options.confirms ?? [])];
+  const state = { stage: 0, gets: 0 };
+  const json = (status: number, value: unknown) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
+  const reply = (name: string | undefined, fallback: string, status: number) => {
+    const body = fixture(name ?? fallback);
+    return json(options.statuses?.[name ?? fallback] ?? (body.success === false ? 422 : status), body);
+  };
+  const fetcher = jest.fn(async (url: string, init?: RequestInit) => {
+    const method = init?.method ?? 'GET';
+    const headers = (init?.headers ?? {}) as Record<string, string>;
+    calls.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : undefined, key: headers['X-Idempotency-Key'] });
+    if (method === 'GET') {
+      state.gets += 1;
+      if (options.failedGets?.includes(state.gets)) throw new TypeError('Network request failed');
+      if (options.closedGets?.includes(state.gets)) return json(409, fixture('session-closed'));
+      return json(200, options.sessions[Math.min(state.stage, options.sessions.length - 1)]);
+    }
+    const channel = url.match(/\/(email|phone)-codes(\/confirm)?$/);
+    if (channel && channel[2]) {
+      const next = confirms.shift();
+      const response = reply(next, 'email-code-confirm', 201);
+      if (response.status === 201) state.stage += 1;
+      return response;
+    }
+    if (channel) return reply(codes.shift(), `${channel[1]}-code-request`, 202);
+    if (url.endsWith('/submit')) {
+      const next = submits.shift();
+      const response = reply(next, 'questionnaire-submission', 201);
+      if (response.status === 201) state.stage += 1;
+      return response;
+    }
+    return json(404, { success: false, message: 'Not found' });
+  });
+  return { fetcher, calls, state };
+}
+
+export function inputs(renderer: () => ReactTestRenderer.ReactTestRenderer) {
+  const field = (label: string) => {
+    const found = renderer().root.findAll(node => node.props.accessibilityLabel === label && typeof node.props.onChangeText === 'function');
+    if (!found.length) throw new Error(`No field ${label}`);
+    return found[0];
+  };
+  const type = async (label: string, value: string) => {
+    await ReactTestRenderer.act(async () => {
+      field(label).props.onChangeText(value);
+    });
+  };
+  return { field, type };
+}
+
+export const issuedAt = (name: string) => Date.parse(fixture(name).data.expires_at) - requirements.contact_codes.ttl_minutes * 60000;
+
+export function fakeNow(now: number) {
+  jest.useFakeTimers({
+    now,
+    doNotFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'setImmediate', 'clearImmediate', 'nextTick', 'queueMicrotask', 'requestAnimationFrame', 'cancelAnimationFrame', 'hrtime', 'performance'],
+  });
 }

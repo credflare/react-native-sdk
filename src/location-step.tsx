@@ -10,16 +10,17 @@ import {
   location as locationSpec,
   locationCopy,
   locationErrorKey,
-  locationRejection,
   locationSettings,
   locationSubmission,
+  rejectionScreen,
   text,
   verifierName,
 } from "@credflare/sdk-javascript";
-import type { CredflareSession, LocationFix, SessionInfo } from "@credflare/sdk-javascript";
+import type { CredflareSession, LocationFix, RejectionScreen, SessionInfo } from "@credflare/sdk-javascript";
 import { requestKey } from "./request-key";
 import { Action, Copy, Link, Notice, Title, usePalette } from "./ui";
 import { SpecIcon } from "./icon";
+import { RejectionPanel } from "./rejection-panel";
 import { ui } from "./theme";
 
 export interface Locator {
@@ -74,12 +75,14 @@ export function CredflareLocation({
   locator = nativeLocator,
   onSubmitted,
   onBusyChanged,
+  onClosed,
 }: {
   session: CredflareSession;
   info: SessionInfo;
   locator?: Locator;
   onSubmitted: () => void;
   onBusyChanged?: (busy: boolean) => void;
+  onClosed?: () => void;
 }) {
   const p = usePalette();
   const settings = locationSettings(info.profile?.verification_requirements);
@@ -89,8 +92,9 @@ export function CredflareLocation({
   const [waiting, setWaiting] = useState(text("location.waiting"));
   const [fix, setFix] = useState<LocationFix>();
   const [error, setError] = useState<string>();
+  const [rejection, setRejection] = useState<RejectionScreen>();
   const [busy, setBusy] = useState(false);
-  const submitKey = useRef(requestKey());
+  const pending = useRef<{ key: string; body: Omit<ReturnType<typeof locationSubmission>, "type"> } | null>(null);
   function working(value: boolean) {
     setBusy(value);
     onBusyChanged?.(value);
@@ -99,6 +103,7 @@ export function CredflareLocation({
     if (busy) return;
     working(true);
     setError(undefined);
+    setRejection(undefined);
     try {
       if (!(await locator.requestPermission())) throw new LocationError("permission_denied");
       setWaiting(text("location.waiting"));
@@ -106,7 +111,7 @@ export function CredflareLocation({
       const next = await acquireFix(() => locator.getFix(), settings!, {
         onAttempt: attempt => { if (attempt > 1) setWaiting(text("location.waiting_accuracy")); },
       });
-      submitKey.current = requestKey();
+      pending.current = null;
       setFix(next);
       setPhase("found");
     } catch (cause) {
@@ -121,16 +126,25 @@ export function CredflareLocation({
     working(true);
     setError(undefined);
     try {
-      const { type: _type, ...submission } = locationSubmission(fix);
-      await session.submitLocation(submission, submitKey.current);
+      if (!pending.current) {
+        const { type: _type, ...body } = locationSubmission(fix);
+        pending.current = { key: requestKey(), body };
+      }
+      await session.submitLocation(pending.current.body, pending.current.key);
       onSubmitted();
     } catch (cause) {
-      if (cause instanceof CredflareError && cause.status === 422) submitKey.current = requestKey();
-      setError(
-        cause instanceof CredflareError && cause.status !== 0
-          ? locationRejection(cause.code, settings) ?? livenessErrorMessage(cause)
-          : text("errors.send_location_failed"),
-      );
+      if (cause instanceof CredflareError && cause.status === 409 && onClosed) {
+        onClosed();
+      } else if (cause instanceof CredflareError && cause.status === 422) {
+        pending.current = null;
+        setRejection(rejectionScreen(cause, { requester: info.requester, location: settings }));
+      } else {
+        setError(
+          cause instanceof CredflareError && cause.status !== 0
+            ? livenessErrorMessage(cause)
+            : text("errors.send_location_failed"),
+        );
+      }
     } finally {
       working(false);
     }
@@ -162,9 +176,15 @@ export function CredflareLocation({
             <Copy small muted>{text("location.time_label")}</Copy>
             <Copy>{new Date(fix.fixTime).toLocaleTimeString()}</Copy>
           </View>
-          {error ? <Notice>{error}</Notice> : null}
-          <Action title={text("location.send")} loading={busy} onPress={() => void send()} />
-          <Link title={text("location.retry")} disabled={busy} onPress={() => void locate()} />
+          {rejection ? (
+            <RejectionPanel rejection={rejection} disabled={busy} onAction={() => void locate()} />
+          ) : (
+            <>
+              {error ? <Notice>{error}</Notice> : null}
+              <Action title={text("location.send")} loading={busy} onPress={() => void send()} />
+              <Link title={text("location.retry")} disabled={busy} onPress={() => void locate()} />
+            </>
+          )}
         </>
       ) : null}
     </View>

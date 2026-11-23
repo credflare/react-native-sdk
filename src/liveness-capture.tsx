@@ -2,10 +2,10 @@ import React, { useEffect, useRef, useState } from "react";
 import { Image, Text, View } from "react-native";
 import {
   CredflareError,
-  challengeRejected,
   createChallengeRun,
   facialSettings,
   livenessErrorMessage,
+  rejectionScreen,
   sendLivenessEvidence,
   text,
   verifierName,
@@ -17,13 +17,40 @@ import type {
   GestureEvidence,
   LivenessChallenge,
   LivenessEvidence,
+  RejectionScreen,
   SessionInfo,
 } from "@credflare/sdk-javascript";
 import type { CapturedFile, LivenessCameraHandle, NativeFaceProvider } from "./liveness-camera";
 import { requestKey } from "./request-key";
 import { Action, Copy, Link, Notice, Title, usePalette } from "./ui";
 import { SpecIcon } from "./icon";
+import { RejectionPanel } from "./rejection-panel";
 import { ui } from "./theme";
+
+const captureTimeoutMs = 15000;
+
+function withinCaptureTime<T>(work: Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("capture timed out")), captureTimeoutMs);
+    work.then(
+      value => { clearTimeout(timer); resolve(value); },
+      cause => { clearTimeout(timer); reject(cause); },
+    );
+  });
+}
+
+class CameraBoundary extends React.Component<{ onError: () => void; children: React.ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  componentDidCatch() {
+    this.props.onError();
+  }
+  render() {
+    return this.state.failed ? null : this.props.children;
+  }
+}
 
 type Phase = "intro" | "starting" | "running" | "selfie" | "review" | "failed";
 
@@ -33,9 +60,10 @@ export interface LivenessProps {
   provider: NativeFaceProvider;
   onSubmitted: () => void;
   onBusyChanged?: (busy: boolean) => void;
+  onClosed?: () => void;
 }
 
-export function CredflareLiveness({ session, info, provider, onSubmitted, onBusyChanged }: LivenessProps) {
+export function CredflareLiveness({ session, info, provider, onSubmitted, onBusyChanged, onClosed }: LivenessProps) {
   const p = usePalette();
   const settings = facialSettings(info.profile?.verification_requirements);
   const verifier = verifierName(info);
@@ -45,6 +73,7 @@ export function CredflareLiveness({ session, info, provider, onSubmitted, onBusy
   const [tracked, setTracked] = useState(false);
   const [recording, setRecording] = useState(false);
   const [error, setError] = useState<string>();
+  const [rejection, setRejection] = useState<RejectionScreen>();
   const [status, setStatus] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [selfie, setSelfie] = useState<CapturedFile>();
@@ -69,7 +98,7 @@ export function CredflareLiveness({ session, info, provider, onSubmitted, onBusy
     setBusy(value);
     onBusyChanged?.(value);
   }
-  function fail(message: string) {
+  function fail(message: string, screen?: RejectionScreen) {
     const current = run.current;
     if (current) current.finished = true;
     void camera.current?.stopRecording().catch(() => null);
@@ -77,17 +106,20 @@ export function CredflareLiveness({ session, info, provider, onSubmitted, onBusy
     if (!mounted.current) return;
     setRecording(false);
     setError(message);
+    setRejection(screen);
     setPhase("failed");
     working(false);
   }
   async function start() {
     working(true);
     setError(undefined);
+    setRejection(undefined);
     setPhase("starting");
     evidence.current = null;
     setSelfie(undefined);
     try {
       if (!(await provider.requestPermission())) return fail(text("errors.camera_denied"));
+      if (provider.isAvailable && !(await provider.isAvailable())) return fail(text("errors.camera_unavailable"));
     } catch {
       return fail(text("errors.camera_unavailable"));
     }
@@ -95,6 +127,7 @@ export function CredflareLiveness({ session, info, provider, onSubmitted, onBusy
     try {
       challenge = await session.createLivenessChallenge(requestKey());
     } catch (cause) {
+      if (cause instanceof CredflareError && cause.status === 422) return fail(cause.message, rejectionScreen(cause, { requester: info.requester }));
       return fail(cause instanceof CredflareError && cause.status !== 0 ? livenessErrorMessage(cause) : text("errors.challenge_failed"));
     }
     if (!mounted.current) return;
@@ -117,7 +150,7 @@ export function CredflareLiveness({ session, info, provider, onSubmitted, onBusy
     if (!current) return;
     current.finished = true;
     setRecording(false);
-    const clip = await camera.current?.stopRecording().catch(() => null) ?? null;
+    const clip = camera.current ? await withinCaptureTime(camera.current.stopRecording()).catch(() => null) : null;
     if (outcome !== "pass") return fail(text(outcome === "timeout" ? "liveness.timeout" : "liveness.expired"));
     if (current.challenge.record_video && !clip) return fail(text("errors.camera_unavailable"));
     try {
@@ -147,7 +180,7 @@ export function CredflareLiveness({ session, info, provider, onSubmitted, onBusy
       const pending: GestureEvidence = { gesture: done.gesture, completedAt: Date.now(), key: requestKey(), file: { uri: "", name: "", type: "" } };
       current.gestures.push(pending);
       current.frames.push(
-        camera.current!.takePhoto(done.gesture).then(file => { pending.file = file; }),
+        withinCaptureTime(camera.current!.takePhoto(done.gesture)).then(file => { pending.file = file; }),
       );
     }
     const total = current.challenge.gestures.length;
@@ -161,7 +194,7 @@ export function CredflareLiveness({ session, info, provider, onSubmitted, onBusy
     if (!current || busy) return;
     working(true);
     try {
-      const photo = await camera.current!.takePhoto("selfie");
+      const photo = await withinCaptureTime(camera.current!.takePhoto("selfie"));
       evidence.current = {
         challenge: current.challenge,
         provider: provider.name,
@@ -192,7 +225,11 @@ export function CredflareLiveness({ session, info, provider, onSubmitted, onBusy
     } catch (cause) {
       if (!mounted.current) return;
       setStatus(undefined);
-      if (challengeRejected(cause)) return fail(text("liveness.expired"));
+      if (cause instanceof CredflareError && cause.status === 409 && onClosed) {
+        working(false);
+        return onClosed();
+      }
+      if (cause instanceof CredflareError && cause.status === 422) return fail(cause.message, rejectionScreen(cause, { requester: info.requester }));
       setError(livenessErrorMessage(cause, text("errors.send_selfie_failed")));
       working(false);
     }
@@ -209,12 +246,18 @@ export function CredflareLiveness({ session, info, provider, onSubmitted, onBusy
           <Title>{text("liveness.title")}</Title>
           <Copy muted>{text("liveness.body", { total: settings?.gesture_count ?? 3 })}</Copy>
           {settings?.record_video !== false ? <Copy small muted>{text("video.consent", { verifier })}</Copy> : null}
-          {error ? <Notice>{error}</Notice> : null}
-          <Action
-            title={phase === "failed" ? text("liveness.retry") : phase === "starting" ? text("selfie.starting_camera") : text("liveness.start")}
-            loading={phase === "starting"}
-            onPress={() => void start()}
-          />
+          {phase === "failed" && rejection ? (
+            <RejectionPanel rejection={rejection} onAction={() => void start()} />
+          ) : (
+            <>
+              {error ? <Notice>{error}</Notice> : null}
+              <Action
+                title={phase === "failed" ? text("liveness.retry") : phase === "starting" ? text("selfie.starting_camera") : text("liveness.start")}
+                loading={phase === "starting"}
+                onPress={() => void start()}
+              />
+            </>
+          )}
           {privacy}
         </>
       ) : null}
@@ -224,13 +267,15 @@ export function CredflareLiveness({ session, info, provider, onSubmitted, onBusy
           {phase === "selfie" ? <Copy muted>{text("selfie.guidance")}</Copy> : null}
           <View style={[ui.camera, { backgroundColor: p.soft }]}>
             <View style={{ flex: 1 }}>
-              <CameraView
-                active
-                recordVideo={!!run.current?.challenge.record_video}
-                handle={camera}
-                onSample={onSample}
-                onError={() => fail(text("errors.camera_unavailable"))}
-              />
+              <CameraBoundary onError={() => fail(text("errors.camera_unavailable"))}>
+                <CameraView
+                  active
+                  recordVideo={!!run.current?.challenge.record_video}
+                  handle={camera}
+                  onSample={onSample}
+                  onError={() => fail(text("errors.camera_unavailable"))}
+                />
+              </CameraBoundary>
             </View>
             <View pointerEvents="none" style={[ui.oval, { borderColor: tracked || phase === "selfie" ? p.success : p.primary }]} />
             {recording ? (

@@ -1,3 +1,10 @@
+const fs = require('fs');
+const path = require('path');
+const sdkModules = fs
+  .readdirSync(path.join(__dirname, '../../javascript-sdk/src'))
+  .filter(name => name.endsWith('.ts') && !name.endsWith('.d.ts'))
+  .map(name => name.slice(0, -3).replace(/\./g, '\\.'))
+  .join('|');
 module.exports = {
   modulePaths: ['<rootDir>/../node_modules'],
   preset: '@react-native/jest-preset',
@@ -6,7 +13,7 @@ module.exports = {
   ],
   setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
   moduleNameMapper: {
-    '^\\./(index|workflow|capture|copy|settings|engine|faces|location|liveness|spec\\.generated)\\.js$':
+    [`^\\./(${sdkModules})\\.js$`]:
       '<rootDir>/../../javascript-sdk/src/$1.ts',
     '^@credflare/sdk-javascript$':
       '<rootDir>/../../javascript-sdk/src/index.ts',

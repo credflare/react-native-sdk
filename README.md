@@ -52,11 +52,21 @@ Add these as direct app dependencies so their native modules are linked:
 | `react-native-vision-camera` | 5.2.4 | Liveness preview, gesture frames, video and selfie |
 | `react-native-nitro-modules` | 0.37.2 | Required by the camera packages |
 | `react-native-nitro-image` | 0.15.2 | Required by the camera |
-| `react-native-vision-camera-face-detector` | 2.1.0 | ML Kit face signals as a camera output |
+| `react-native-vision-camera-face-detector` | 2.1.0 | ML Kit face signals on Android |
 | `react-native-geolocation-service` | 5.3.1 | Location fixes |
 | `react-native-svg` | 15.16.1 | Spec icons |
 
-Run pod installation for iOS. The face detector requires iOS 15.5 or later, so set `platform :ios, '15.5'` in the Podfile and the app's deployment target to match. Permissions:
+On iOS the SDK reads face signals with Apple's Vision framework through its own pod, so ML Kit is not linked there (its pods have no simulator build for Apple silicon). Turn off the face detector's iOS linking in the app's `react-native.config.js`, as the example does:
+
+```js
+module.exports = {
+  dependencies: {
+    'react-native-vision-camera-face-detector': { platforms: { ios: null } },
+  },
+};
+```
+
+Then run pod installation for iOS. Permissions:
 
 - iOS `Info.plist`: `NSCameraUsageDescription`, `NSPhotoLibraryUsageDescription` and `NSLocationWhenInUseUsageDescription`. Video is recorded without audio, so no microphone permission is needed.
 - Android manifest: `android.permission.CAMERA`, `android.permission.ACCESS_FINE_LOCATION` and `android.permission.ACCESS_COARSE_LOCATION`. The SDK requests location at runtime; the camera package requests camera access when liveness starts.
@@ -79,15 +89,21 @@ See [flow requirements](docs/SDK-FLOW.md) for the remaining guided-flow and phys
 
 ## Guided flow
 
-Use `<CredflareVerification sessionProvider={provider} onClose={close} />`. Your provider returns a session from the host application's authenticated backend. The component selects documents, guides capture, reviews evidence, then runs the remaining `facial_verification` and `location_verification` requirements in profile order and ends with a receipt that lists what was received. Forms and other checks are left to the host app, and the receipt says so.
+Use `<CredflareVerification sessionProvider={provider} onClose={close} />`. Your provider returns a session from the host application's authenticated backend. The component asks the questionnaire, selects documents, guides capture, reviews evidence, then runs the remaining `facial_verification`, `location_verification`, `email_verification` and `phone_verification` requirements in profile order. After every submission and code confirmation it loads the session again: while the case is open and requirements remain (including ones a workflow added during the case) it continues with the next step, otherwise it shows a receipt that lists what was received. If that check fails it asks to try again instead of showing the receipt; a `409` means the case closed after the last submission (for example a workflow approved it), so the receipt shows. `onHostActionRequired({code})` is called before `onClose` when nothing more can be done in the app: a rejection whose action is `leave` (its `code` is passed) or a receipt that hands the remaining checks to the host (`code` is `null`). Leaving a `leave` rejection by the close button or Back also reports its code. Checks the SDK cannot run are left to the host app, and the receipt says so. `onSubmitted(info)` receives the final session when nothing is outstanding. When the case closed (`409`) and the server returned no session, `onClosed()` is called instead.
+
+Questions support every type in the spec (`text`, `textarea`, `number`, `date`, `email`, `phone`, `tel`, `select`, `single_select`, `multi_select`, `country` and `consent`). A question whose `show_if` does not match the answers given so far is not shown, not checked and not sent. Countries are picked from a searchable list and sent as ISO codes.
+
+Email and phone steps ask for the address or number, request a code, take the six digit code and confirm it. The resend link counts down to the server's `resend_available_at`, and phone numbers are sent without spaces, brackets, dots or dashes.
+
+Every rejection with a `code` shows the shared copy from the spec: a title, a message, who requested the evidence, a help line naming the requester and a button for the code's action (try again, start again, enter the code again, send a new code, wait for the resend countdown, or close). A rejection without a known code shows the server message with a retry.
 
 Each document has its own rule. For example, require a camera photo of an ID and an uploaded bank statement in one profile. `snapshot_or_upload` allows one source per side, `snapshot` requires a camera photo, `upload` requires a saved file, and `snapshot_and_upload` requires both sources of the same document. Camera source is client reported, not proof of a trusted camera feed.
 
-Liveness requests a server challenge, shows the front camera with positioning hints, runs the server's gestures in order through the gesture engine shared with the JavaScript SDK, takes a JPEG frame as each gesture completes, records a video without audio during the challenge when `record_video` is on, then takes the selfie and uploads everything with the challenge ID. A timeout or an expired challenge offers a retry with a new challenge. The checks show that the camera saw a server chosen sequence in time; they do not prove a live person or detect deepfakes.
+Liveness requests a server challenge, shows the front camera with positioning hints, runs the server's gestures in order through the gesture engine shared with the JavaScript SDK, takes a JPEG frame as each gesture completes, records a video without audio during the challenge when `record_video` is on, then takes the selfie and uploads everything with the challenge ID. A timeout offers a retry with a new challenge, and a rejected submission shows the shared rejection screen whose button starts again with a new challenge. The checks show that the camera saw a server chosen sequence in time; they do not prove a live person or detect deepfakes.
 
-Face signals come from ML Kit face detection through `react-native-vision-camera-face-detector`, attached to the camera as an output (`mlKitFaceProvider`). Pass `faceProvider` to use another provider with the same `NativeFaceProvider` shape, for example in tests. The provider sends ML Kit's `headEulerAngleY` as `yaw` and `headEulerAngleX` as `pitch`, read from the unmirrored frames ML Kit analyses. The contract expects `yaw` positive when the person turns to their own left and `pitch` positive when the head tilts up.
+Face signals come from a camera output chosen per platform (`nativeFaceProvider`). On iOS it runs Apple Vision face rectangles and landmarks on upright, unmirrored frames, with the same conversions and eye and smile baselines as the Swift SDK (`visionFaceProvider`, reported as `vision`). On Android it runs ML Kit face detection through `react-native-vision-camera-face-detector` (reported as `mlkit`), sending `headEulerAngleY` as `yaw` and `headEulerAngleX` as `pitch`. The contract expects `yaw` positive when the person turns to their own left and `pitch` positive when the head tilts up. `mlKitFaceProvider` is kept as a deprecated name for `nativeFaceProvider`. Pass `faceProvider` to use another provider with the same `NativeFaceProvider` shape, for example in tests.
 
-Location shows the consent copy (naming the reference place by its label when one is configured), requests permission, takes a high accuracy fix and retries up to the spec attempts until it meets `max_accuracy_m` and `max_age_s`. Android reports `is_mock` from the platform's mock flag; iOS sends `null`. Server rejections are shown with their reason and a retry. No geocoding or IP lookup is called. Pass `locator` to replace the native location source.
+Location shows the consent copy (naming the reference place by its label when one is configured), requests permission, takes a high accuracy fix and retries up to the spec attempts until it meets `max_accuracy_m` and `max_age_s`. Android reports `is_mock` from the platform's mock flag; iOS sends `null`. Server rejections show the shared rejection screen, and its retry takes a new fix. No geocoding or IP lookup is called. Pass `locator` to replace the native location source.
 
 All copy, colours, type sizes and icons come from the spec constants exported by the JavaScript SDK; text is centred on every screen. The file picker supports permitted images, PDFs and DOCX files. Bundle the Ubuntu font files from `assets/fonts` into the host app's native font resources, as in the example. The SDK supplies light and dark themes.
 
