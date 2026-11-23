@@ -7,8 +7,8 @@ const cases: {
   show_if: { name: string; show_if: ShowIf | null; form: Record<string, unknown> | unknown[]; expect: boolean }[];
 } = fixture('show-if-cases');
 
-test('the spec holds 62 server computed cases', () => {
-  expect(cases.conditions.length + cases.show_if.length).toBe(62);
+test('the spec holds 65 server computed cases', () => {
+  expect(cases.conditions.length + cases.show_if.length).toBe(65);
 });
 
 test.each(cases.conditions.map(item => [item.name, item] as const))('condition: %s', (_name, item) => {
