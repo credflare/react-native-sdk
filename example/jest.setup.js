@@ -49,3 +49,9 @@ jest.mock('react-native-geolocation-service', () => ({
     requestAuthorization: jest.fn(async () => 'granted'),
   },
 }));
+
+jest.mock('react-native-nitro-modules', () => ({
+  NitroModules: {
+    createHybridObject: jest.fn(() => ({createOutput: jest.fn(() => ({}))})),
+  },
+}));

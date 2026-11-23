@@ -52,11 +52,21 @@ Add these as direct app dependencies so their native modules are linked:
 | `react-native-vision-camera` | 5.2.4 | Liveness preview, gesture frames, video and selfie |
 | `react-native-nitro-modules` | 0.37.2 | Required by the camera packages |
 | `react-native-nitro-image` | 0.15.2 | Required by the camera |
-| `react-native-vision-camera-face-detector` | 2.1.0 | ML Kit face signals as a camera output |
+| `react-native-vision-camera-face-detector` | 2.1.0 | ML Kit face signals on Android |
 | `react-native-geolocation-service` | 5.3.1 | Location fixes |
 | `react-native-svg` | 15.16.1 | Spec icons |
 
-Run pod installation for iOS. The face detector requires iOS 15.5 or later, so set `platform :ios, '15.5'` in the Podfile and the app's deployment target to match. Permissions:
+On iOS the SDK reads face signals with Apple's Vision framework through its own pod, so ML Kit is not linked there (its pods have no simulator build for Apple silicon). Turn off the face detector's iOS linking in the app's `react-native.config.js`, as the example does:
+
+```js
+module.exports = {
+  dependencies: {
+    'react-native-vision-camera-face-detector': { platforms: { ios: null } },
+  },
+};
+```
+
+Then run pod installation for iOS. Permissions:
 
 - iOS `Info.plist`: `NSCameraUsageDescription`, `NSPhotoLibraryUsageDescription` and `NSLocationWhenInUseUsageDescription`. Video is recorded without audio, so no microphone permission is needed.
 - Android manifest: `android.permission.CAMERA`, `android.permission.ACCESS_FINE_LOCATION` and `android.permission.ACCESS_COARSE_LOCATION`. The SDK requests location at runtime; the camera package requests camera access when liveness starts.
@@ -91,7 +101,7 @@ Each document has its own rule. For example, require a camera photo of an ID and
 
 Liveness requests a server challenge, shows the front camera with positioning hints, runs the server's gestures in order through the gesture engine shared with the JavaScript SDK, takes a JPEG frame as each gesture completes, records a video without audio during the challenge when `record_video` is on, then takes the selfie and uploads everything with the challenge ID. A timeout offers a retry with a new challenge, and a rejected submission shows the shared rejection screen whose button starts again with a new challenge. The checks show that the camera saw a server chosen sequence in time; they do not prove a live person or detect deepfakes.
 
-Face signals come from ML Kit face detection through `react-native-vision-camera-face-detector`, attached to the camera as an output (`mlKitFaceProvider`). Pass `faceProvider` to use another provider with the same `NativeFaceProvider` shape, for example in tests. The provider sends ML Kit's `headEulerAngleY` as `yaw` and `headEulerAngleX` as `pitch`, read from the unmirrored frames ML Kit analyses. The contract expects `yaw` positive when the person turns to their own left and `pitch` positive when the head tilts up.
+Face signals come from a camera output chosen per platform (`nativeFaceProvider`). On iOS it runs Apple Vision face rectangles and landmarks on upright, unmirrored frames, with the same conversions and eye and smile baselines as the Swift SDK (`visionFaceProvider`, reported as `vision`). On Android it runs ML Kit face detection through `react-native-vision-camera-face-detector` (reported as `mlkit`), sending `headEulerAngleY` as `yaw` and `headEulerAngleX` as `pitch`. The contract expects `yaw` positive when the person turns to their own left and `pitch` positive when the head tilts up. `mlKitFaceProvider` is kept as a deprecated name for `nativeFaceProvider`. Pass `faceProvider` to use another provider with the same `NativeFaceProvider` shape, for example in tests.
 
 Location shows the consent copy (naming the reference place by its label when one is configured), requests permission, takes a high accuracy fix and retries up to the spec attempts until it meets `max_accuracy_m` and `max_age_s`. Android reports `is_mock` from the platform's mock flag; iOS sends `null`. Server rejections show the shared rejection screen, and its retry takes a new fix. No geocoding or IP lookup is called. Pass `locator` to replace the native location source.
 

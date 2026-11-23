@@ -1,5 +1,5 @@
 import React, { useEffect, useImperativeHandle, useMemo, useRef } from "react";
-import { StyleSheet } from "react-native";
+import { Platform, StyleSheet } from "react-native";
 import {
   Camera,
   CommonResolutions,
@@ -8,10 +8,11 @@ import {
   usePhotoOutput,
   useVideoOutput,
 } from "react-native-vision-camera";
-import type { Recorder } from "react-native-vision-camera";
-import { createFaceDetectorOutput } from "react-native-vision-camera-face-detector";
+import type { CameraOutput, Recorder } from "react-native-vision-camera";
 import type { FaceProviderName, FaceSample } from "@credflare/sdk-javascript";
 import { normalizeMlKitFaces } from "./mlkit";
+import { VisionSignalNormalizer } from "./vision";
+import type { VisionFaceDetectorFactory } from "./specs/face-vision.nitro";
 
 export interface CapturedFile {
   uri: string;
@@ -39,23 +40,49 @@ export interface NativeFaceProvider {
 
 const fileUri = (path: string) => (path.startsWith("file://") ? path : `file://${path}`);
 
-function MlKitCamera({ active, recordVideo, handle, onSample, onError }: LivenessCameraProps) {
+type FaceOutputFactory = (onSample: (sample: FaceSample) => void, onError: (error: Error) => void) => CameraOutput;
+
+const mlKitOutput: FaceOutputFactory = (onSample, onError) => {
+  const { createFaceDetectorOutput } = require("react-native-vision-camera-face-detector") as typeof import("react-native-vision-camera-face-detector");
+  return createFaceDetectorOutput({
+    performanceMode: "fast",
+    runClassifications: true,
+    cameraFacing: "front",
+    autoMode: false,
+    onFacesDetected: detected => onSample(normalizeMlKitFaces(detected, Date.now())),
+    onError,
+  });
+};
+
+let visionFactory: VisionFaceDetectorFactory | undefined;
+
+const visionOutput: FaceOutputFactory = (onSample, onError) => {
+  if (!visionFactory) {
+    const { NitroModules } = require("react-native-nitro-modules") as typeof import("react-native-nitro-modules");
+    visionFactory = NitroModules.createHybridObject<VisionFaceDetectorFactory>("VisionFaceDetectorFactory");
+  }
+  const normalizer = new VisionSignalNormalizer();
+  return visionFactory.createOutput({
+    onReading: reading => onSample(normalizer.sample(reading, Date.now())),
+    onError,
+  });
+};
+
+function faceCamera(createOutput: FaceOutputFactory) {
+  return function FaceCamera(props: LivenessCameraProps) {
+    return <NativeCamera {...props} createOutput={createOutput} />;
+  };
+}
+
+function NativeCamera({ active, recordVideo, handle, onSample, onError, createOutput }: LivenessCameraProps & { createOutput: FaceOutputFactory }) {
   const sample = useRef(onSample), failure = useRef(onError);
   sample.current = onSample;
   failure.current = onError;
   const photo = usePhotoOutput({ targetResolution: CommonResolutions.HD_4_3, containerFormat: "jpeg", quality: 0.9 });
   const video = useVideoOutput({ targetResolution: CommonResolutions.VGA_4_3, enableAudio: false, fileType: "mp4" });
   const faces = useMemo(
-    () =>
-      createFaceDetectorOutput({
-        performanceMode: "fast",
-        runClassifications: true,
-        cameraFacing: "front",
-        autoMode: false,
-        onFacesDetected: detected => sample.current(normalizeMlKitFaces(detected, Date.now())),
-        onError: error => failure.current(error),
-      }),
-    [],
+    () => createOutput(next => sample.current(next), error => failure.current(error)),
+    [createOutput],
   );
   const recorder = useRef<{ recorder: Recorder; done: Promise<string | null> } | null>(null);
   useImperativeHandle(handle, () => ({
@@ -98,9 +125,24 @@ function MlKitCamera({ active, recordVideo, handle, onSample, onError }: Livenes
   );
 }
 
-export const mlKitFaceProvider: NativeFaceProvider = {
-  name: "mlkit",
-  Camera: MlKitCamera,
-  requestPermission: async () => VisionCamera.cameraPermissionStatus === "authorized" || VisionCamera.requestCameraPermission(),
-  isAvailable: async () => getCameraDevice(await VisionCamera.createDeviceFactory(), "front") != null,
+const requestPermission = async () => VisionCamera.cameraPermissionStatus === "authorized" || VisionCamera.requestCameraPermission();
+const isAvailable = async () => getCameraDevice(await VisionCamera.createDeviceFactory(), "front") != null;
+
+export const visionFaceProvider: NativeFaceProvider = {
+  name: "vision",
+  Camera: faceCamera(visionOutput),
+  requestPermission,
+  isAvailable,
 };
+
+const androidMlKitFaceProvider: NativeFaceProvider = {
+  name: "mlkit",
+  Camera: faceCamera(mlKitOutput),
+  requestPermission,
+  isAvailable,
+};
+
+export const nativeFaceProvider: NativeFaceProvider = Platform.OS === "ios" ? visionFaceProvider : androidMlKitFaceProvider;
+
+/** @deprecated Use `nativeFaceProvider`. On iOS this is the Apple Vision provider. */
+export const mlKitFaceProvider: NativeFaceProvider = nativeFaceProvider;

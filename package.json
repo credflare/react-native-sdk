@@ -7,7 +7,12 @@
   "files": [
     "src",
     "docs",
-    "assets"
+    "assets",
+    "ios",
+    "nitrogen",
+    "nitro.json",
+    "CredflareFaceVision.podspec",
+    "react-native.config.js"
   ],
   "workspaces": [
     "example"

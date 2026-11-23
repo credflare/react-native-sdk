@@ -29,7 +29,7 @@ import type {
 import { CredflareLiveness } from "./liveness-capture";
 import { CredflareLocation } from "./location-step";
 import type { Locator } from "./location-step";
-import { mlKitFaceProvider } from "./liveness-camera";
+import { nativeFaceProvider } from "./liveness-camera";
 import type { NativeFaceProvider } from "./liveness-camera";
 import { CredflareDocumentCapture } from "./document-capture";
 import { CredflareContactCode } from "./contact-code-step";
@@ -101,7 +101,7 @@ export function CredflareVerification({
   onCancelled,
   onHostActionRequired,
   autoStart = false,
-  faceProvider = mlKitFaceProvider,
+  faceProvider = nativeFaceProvider,
   locator,
 }: VerificationProps) {
   const p = usePalette(),
