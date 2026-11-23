@@ -94,7 +94,7 @@ export function CredflareLocation({
   const [error, setError] = useState<string>();
   const [rejection, setRejection] = useState<RejectionScreen>();
   const [busy, setBusy] = useState(false);
-  const submitKey = useRef(requestKey());
+  const pending = useRef<{ key: string; body: Omit<ReturnType<typeof locationSubmission>, "type"> } | null>(null);
   function working(value: boolean) {
     setBusy(value);
     onBusyChanged?.(value);
@@ -111,7 +111,7 @@ export function CredflareLocation({
       const next = await acquireFix(() => locator.getFix(), settings!, {
         onAttempt: attempt => { if (attempt > 1) setWaiting(text("location.waiting_accuracy")); },
       });
-      submitKey.current = requestKey();
+      pending.current = null;
       setFix(next);
       setPhase("found");
     } catch (cause) {
@@ -126,14 +126,17 @@ export function CredflareLocation({
     working(true);
     setError(undefined);
     try {
-      const { type: _type, ...submission } = locationSubmission(fix);
-      await session.submitLocation(submission, submitKey.current);
+      if (!pending.current) {
+        const { type: _type, ...body } = locationSubmission(fix);
+        pending.current = { key: requestKey(), body };
+      }
+      await session.submitLocation(pending.current.body, pending.current.key);
       onSubmitted();
     } catch (cause) {
       if (cause instanceof CredflareError && cause.status === 409 && onClosed) {
         onClosed();
       } else if (cause instanceof CredflareError && cause.status === 422) {
-        submitKey.current = requestKey();
+        pending.current = null;
         setRejection(rejectionScreen(cause, { requester: info.requester, location: settings }));
       } else {
         setError(

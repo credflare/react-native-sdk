@@ -90,7 +90,7 @@ test('a mock location is refused on the device and never sent', async () => {
   await ReactTestRenderer.act(async () => renderer!.unmount());
 }, 60000);
 
-test('a send that never reached the server is retried with the same request key', async () => {
+test('a send that never reached the server is retried with the same request key and the same body', async () => {
   const api = fakeApi({ droppedSubmits: 1 });
   api.stage.facial = true;
   global.fetch = api.fetcher as unknown as typeof fetch;
@@ -106,12 +106,16 @@ test('a send that never reached the server is retried with the same request key'
   await waitFor(() => texts().includes('Send location'), 'fix found');
   await press('Send location');
   await waitFor(() => texts().includes(text('errors.send_location_failed')), 'network failure');
+  const firstSentAt = Date.now();
+  await waitFor(() => Date.now() > firstSentAt + 5, 'a later moment');
   await press('Send location');
   await waitFor(() => texts().includes('Evidence received'), 'receipt');
-  const keys = api.calls.filter(call => call.url.endsWith('/submit')).map(call => call.key);
+  const submits = api.calls.filter(call => call.url.endsWith('/submit'));
+  const keys = submits.map(call => call.key);
   expect(keys).toHaveLength(2);
   expect(keys[0]).toMatch(/^[0-9a-f-]{36}$/);
   expect(keys[1]).toBe(keys[0]);
+  expect(submits[1].body).toBe(submits[0].body);
   await ReactTestRenderer.act(async () => renderer!.unmount());
 }, 60000);
 
