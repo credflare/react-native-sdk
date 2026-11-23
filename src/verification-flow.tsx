@@ -12,6 +12,7 @@ import {
   CredflareSession,
   isCaptureSupported,
   documentsNextKey,
+  earlierAnswers,
   methodSummary,
   nextStep,
   receiptKey,
@@ -19,6 +20,7 @@ import {
   verifierName,
 } from "@credflare/sdk-javascript";
 import type {
+  Answers,
   DocumentRequirement,
   FlowStep,
   SessionDescriptor,
@@ -50,7 +52,7 @@ import { ui } from "./theme";
 export interface VerificationProps {
   sessionProvider: () => Promise<SessionDescriptor>;
   onClose: () => void;
-  onSubmitted?: (info: SessionInfo) => void;
+  onSubmitted?: (info: SessionInfo | null) => void;
   onCancelled?: () => void;
   onHostActionRequired?: (details: { code: string | null }) => void;
   autoStart?: boolean;
@@ -103,7 +105,8 @@ export function CredflareVerification({
   const p = usePalette(),
     client = useRef<CredflareSession | undefined>(undefined),
     active = useRef(false),
-    mounted = useRef(true);
+    mounted = useRef(true),
+    answered = useRef<Answers>({});
   const [info, setInfo] = useState<SessionInfo>(),
     [document, setDocument] = useState<DocumentRequirement>(),
     [loading, setLoading] = useState(false),
@@ -114,6 +117,7 @@ export function CredflareVerification({
     [confirmDiscard, setConfirmDiscard] = useState(false),
     [pendingReceipt, setPendingReceipt] = useState(false),
     [closed, setClosed] = useState(false),
+    [leaveCode, setLeaveCode] = useState<string | null>(),
     [received, setReceived] = useState<string[]>([]);
   const message = (cause: unknown, fallback: string) =>
     cause instanceof CredflareError
@@ -168,13 +172,13 @@ export function CredflareVerification({
       if (!mounted.current) return;
       setInfo(metadata);
       setPendingReceipt(false);
-      if (nextStep(metadata) === "done") onSubmitted?.(metadata);
+      if (nextStep(metadata, earlierAnswers(metadata, answered.current)) === "done") onSubmitted?.(metadata);
     } catch (cause) {
       if (!mounted.current) return;
       if (cause instanceof CredflareError && cause.status === 409) {
         setClosed(true);
         setPendingReceipt(false);
-        if (info) onSubmitted?.(info);
+        onSubmitted?.(null);
       } else setError(text("errors.refresh_failed"));
     } finally {
       active.current = false;
@@ -187,7 +191,7 @@ export function CredflareVerification({
   }
   const verifier = verifierName(info);
   const docs = info?.profile?.document_requirements ?? [];
-  const step = closed ? "done" : info ? nextStep(info) : null;
+  const step = closed ? "done" : info ? nextStep(info, earlierAnswers(info, answered.current)) : null;
   const allReceived = !pendingReceipt && (step === "done" || step === "host");
   const finish = () => {
     if (step === "host") onHostActionRequired?.({ code: null });
@@ -198,6 +202,7 @@ export function CredflareVerification({
     onClose();
   };
   const receive = (label: string) => {
+    setLeaveCode(undefined);
     setReceived(items => [...items, label]);
     void refresh();
   };
@@ -342,7 +347,11 @@ export function CredflareVerification({
             key={JSON.stringify(info.profile?.form_schema)}
             session={client.current!}
             info={info}
-            onSubmitted={() => receiveStep("questions")}
+            earlier={answered.current}
+            onSubmitted={fields => {
+              answered.current = { ...answered.current, ...fields };
+              receiveStep("questions");
+            }}
             onBusyChanged={setCaptureBusy}
           />
         ) : step === "email_verification" || step === "phone_verification" ? (
@@ -354,6 +363,7 @@ export function CredflareVerification({
             onSubmitted={() => receiveStep(step)}
             onLeave={leave}
             onBusyChanged={setCaptureBusy}
+            onRejection={screen => setLeaveCode(screen?.action === "leave" ? screen.code : undefined)}
           />
         ) : (
           <>
@@ -427,6 +437,7 @@ export function CredflareVerification({
         onStay={() => setConfirmExit(false)}
         onLeave={() => {
           setConfirmExit(false);
+          if (leaveCode !== undefined) return leave(leaveCode);
           onCancelled?.();
           onClose();
         }}

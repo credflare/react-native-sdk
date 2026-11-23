@@ -3,10 +3,10 @@ import { readdirSync } from 'fs';
 import { join } from 'path';
 import { Linking } from 'react-native';
 import ReactTestRenderer from 'react-test-renderer';
-import { rejections, text } from '@credflare/sdk-javascript';
+import { rejections, requirements, text } from '@credflare/sdk-javascript';
 import type { CopyKey } from '@credflare/sdk-javascript';
 import { CredflareVerification } from '@credflare/sdk-react-native';
-import { contactApi, descriptor, fixture, helpers, inputs } from '../test-support/flow-harness';
+import { contactApi, descriptor, fakeNow, fixture, helpers, inputs, issuedAt } from '../test-support/flow-harness';
 
 const verifier = fixture('requirement-added-session').data.requester.name;
 const sendCodes = ['not_configured', 'resend_too_soon', 'send_limit'];
@@ -75,9 +75,12 @@ test.each(codes)('%s shows the shared copy and its action', async code => {
       expect(onClose).toHaveBeenCalledTimes(1);
       break;
     case 'wait': {
-      const button = renderer!.root.findAll(node => node.props.accessibilityRole === 'button' && node.props.accessibilityState?.disabled === true);
-      expect(button.length).toBeGreaterThan(0);
       expect(texts()).toContain(text('contact_code.resend_in', { seconds: 42 }));
+      await press(text('rejection.action.wait'));
+      expect(texts()).toContain(text('contact_code.title'));
+      expect(field(text('contact_code.label')).props.value).toBe('');
+      expect(texts()).toContain(text('contact_code.resend_in', { seconds: 42 }));
+      expect(texts()).not.toContain(text('contact_code.resend'));
       expect(requests()).toBe(before);
       break;
     }
@@ -128,7 +131,7 @@ test('the help line links to the help contact the requester set', async () => {
 }, 30000);
 
 test('the resend button counts down from the last code request and then sends a new code', async () => {
-  jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate'] });
+  jest.useFakeTimers({ now: issuedAt('email-code-request'), doNotFake: ['nextTick', 'setImmediate'] });
   try {
     const api = contactApi({ sessions: [session('email')] });
     global.fetch = api.fetcher as unknown as typeof fetch;
@@ -161,6 +164,86 @@ test('the resend button counts down from the last code request and then sends a 
       { email: 'jane.doe@example.test' },
     ]);
     await ReactTestRenderer.act(async () => renderer!.unmount());
+  } finally {
+    jest.useRealTimers();
+  }
+}, 30000);
+
+async function openFlow(api: ReturnType<typeof contactApi>, props: Partial<React.ComponentProps<typeof CredflareVerification>> = {}) {
+  global.fetch = api.fetcher as unknown as typeof fetch;
+  let renderer: ReactTestRenderer.ReactTestRenderer;
+  await ReactTestRenderer.act(async () => {
+    renderer = ReactTestRenderer.create(<CredflareVerification autoStart onClose={() => {}} sessionProvider={descriptor} {...props} />);
+  });
+  return { ...helpers(() => renderer!), ...inputs(() => renderer!), renderer: () => renderer!, unmount: () => ReactTestRenderer.act(async () => renderer!.unmount()) };
+}
+
+test('leaving a leave rejection by the header close reports the rejection code, never a cancellation', async () => {
+  const onHostActionRequired = jest.fn();
+  const onCancelled = jest.fn();
+  const onClose = jest.fn();
+  const view = await openFlow(contactApi({ sessions: [session('phone')], codes: ['rejections/phone.not_configured'] }), { onHostActionRequired, onCancelled, onClose });
+  await view.waitFor(() => view.texts().includes(text('phone.title')), 'destination');
+  await view.type(text('phone.label'), '+237650000001');
+  await view.press(text('phone.send'));
+  await view.waitFor(() => view.texts().includes(text('rejection.phone_not_configured.title', { verifier })), 'rejection');
+  await view.press(text('common.close'));
+  await view.press(text('exit.leave'));
+  expect(onHostActionRequired).toHaveBeenCalledWith({ code: 'phone.not_configured' });
+  expect(onCancelled).not.toHaveBeenCalled();
+  expect(onClose).toHaveBeenCalledTimes(1);
+  await view.unmount();
+}, 30000);
+
+test('a resend rejection without a code on screen lets the applicant type the code they already have', async () => {
+  const rejection = fixture('rejections/phone.resend_too_soon');
+  fakeNow(Date.parse(rejection.resend_available_at) - 30000);
+  try {
+    const api = contactApi({ sessions: [session('phone'), { ...session('phone'), data: { ...session('phone').data, profile: { ...session('phone').data.profile, verification_requirements: [] } } }], codes: ['rejections/phone.resend_too_soon'] });
+    const view = await openFlow(api);
+    await view.waitFor(() => view.texts().includes(text('phone.title')), 'destination');
+    await view.type(text('phone.label'), '+237 650 000 001');
+    await view.press(text('phone.send'));
+    await view.waitFor(() => view.texts().includes(text('rejection.code_resend_too_soon.title', { verifier })), 'rejection');
+    await view.press(text('rejection.action.wait'));
+    expect(view.texts()).toContain(text('contact_code.body', { destination: '+237 650 000 001', minutes: requirements.contact_codes.ttl_minutes }));
+    expect(view.texts()).toContain(text('contact_code.resend_in', { seconds: 30 }));
+    await view.type(text('contact_code.label'), '123456');
+    await view.press(text('contact_code.confirm'));
+    await view.waitFor(() => view.texts().includes(text('receipt.title')), 'receipt');
+    expect(api.calls.find(call => call.url.endsWith('/phone-codes/confirm'))!.body).toEqual({ code: '123456' });
+    await view.unmount();
+  } finally {
+    jest.useRealTimers();
+  }
+}, 30000);
+
+test('a failed request for a new code replaces the expired code rejection with the error', async () => {
+  const api = contactApi({ sessions: [session('phone')], codes: ['phone-code-request', 'unauthorized'], confirms: ['rejections/phone.code_expired'], statuses: { unauthorized: 401 } });
+  const view = await openFlow(api);
+  await view.waitFor(() => view.texts().includes(text('phone.title')), 'destination');
+  await view.type(text('phone.label'), '+237650000001');
+  await view.press(text('phone.send'));
+  await view.waitFor(() => view.texts().includes(text('contact_code.title')), 'code entry');
+  await view.type(text('contact_code.label'), '123456');
+  await view.press(text('contact_code.confirm'));
+  await view.waitFor(() => view.texts().includes(text('rejection.code_expired.title', { verifier })), 'expired');
+  await view.press(text('rejection.action.new_code'));
+  await view.waitFor(() => view.texts().includes(text('errors.session_expired')), 'session expired');
+  expect(view.texts()).not.toContain(text('rejection.code_expired.title', { verifier }));
+  await view.unmount();
+}, 30000);
+
+test('the resend countdown runs to the deadline the server set, even when the response was slow', async () => {
+  fakeNow(issuedAt('phone-code-request') + 20000);
+  try {
+    const view = await openFlow(contactApi({ sessions: [session('phone')] }));
+    await view.waitFor(() => view.texts().includes(text('phone.title')), 'destination');
+    await view.type(text('phone.label'), '+237650000001');
+    await view.press(text('phone.send'));
+    await view.waitFor(() => view.texts().includes(text('contact_code.title')), 'code entry');
+    expect(view.texts()).toContain(text('contact_code.resend_in', { seconds: 40 }));
+    await view.unmount();
   } finally {
     jest.useRealTimers();
   }

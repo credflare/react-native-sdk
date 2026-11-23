@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { Text } from 'react-native';
 import ReactTestRenderer from 'react-test-renderer';
 import { Response } from 'whatwg-fetch';
+import { requirements } from '@credflare/sdk-javascript';
 import type {
   FaceSample,
   LivenessCameraProps,
@@ -158,7 +159,7 @@ export const completed = (name: string) => {
   return { ...base, data: { ...base.data, status: 'in_progress', profile: { ...base.data.profile, form_schema: null, verification_requirements: [], document_requirements: [] } } };
 };
 
-export function contactApi(options: { sessions: unknown[]; submits?: string[]; codes?: string[]; confirms?: string[]; failedGets?: number[]; closedGets?: number[] }) {
+export function contactApi(options: { sessions: unknown[]; submits?: string[]; codes?: string[]; confirms?: string[]; failedGets?: number[]; closedGets?: number[]; statuses?: Record<string, number> }) {
   const calls: Call[] = [];
   const submits = [...(options.submits ?? [])];
   const codes = [...(options.codes ?? [])];
@@ -167,7 +168,7 @@ export function contactApi(options: { sessions: unknown[]; submits?: string[]; c
   const json = (status: number, value: unknown) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
   const reply = (name: string | undefined, fallback: string, status: number) => {
     const body = fixture(name ?? fallback);
-    return json(body.success === false ? 422 : status, body);
+    return json(options.statuses?.[name ?? fallback] ?? (body.success === false ? 422 : status), body);
   };
   const fetcher = jest.fn(async (url: string, init?: RequestInit) => {
     const method = init?.method ?? 'GET';
@@ -210,4 +211,13 @@ export function inputs(renderer: () => ReactTestRenderer.ReactTestRenderer) {
     });
   };
   return { field, type };
+}
+
+export const issuedAt = (name: string) => Date.parse(fixture(name).data.expires_at) - requirements.contact_codes.ttl_minutes * 60000;
+
+export function fakeNow(now: number) {
+  jest.useFakeTimers({
+    now,
+    doNotFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'setImmediate', 'clearImmediate', 'nextTick', 'queueMicrotask', 'requestAnimationFrame', 'cancelAnimationFrame', 'hrtime', 'performance'],
+  });
 }

@@ -16,11 +16,9 @@ import { ui } from "./theme";
 
 const rules = requirements.contact_codes;
 
-export function resendDelay(sent: Pick<CodeRequest, "expires_at" | "resend_available_at">): number {
-  const issued = Date.parse(sent.expires_at) - rules.ttl_minutes * 60000;
-  const ready = Date.parse(sent.resend_available_at);
-  if (Number.isNaN(issued) || Number.isNaN(ready)) return rules.resend_seconds * 1000;
-  return Math.max(0, ready - issued);
+interface PendingCode {
+  destination: string;
+  sends_remaining: number | null;
 }
 
 export interface ContactCodeProps {
@@ -30,21 +28,22 @@ export interface ContactCodeProps {
   onSubmitted: () => void;
   onLeave: (code: string | null) => void;
   onBusyChanged?: (busy: boolean) => void;
+  onRejection?: (rejection: RejectionScreen | null) => void;
 }
 
-export function CredflareContactCode({ session, info, channel, onSubmitted, onLeave, onBusyChanged }: ContactCodeProps) {
+export function CredflareContactCode({ session, info, channel, onSubmitted, onLeave, onBusyChanged, onRejection }: ContactCodeProps) {
   const p = usePalette();
   const verifier = verifierName(info);
   const say = (key: string) => text(`${channel}.${key}` as CopyKey, { verifier });
   const [phase, setPhase] = useState<"destination" | "code">("destination");
   const [destination, setDestination] = useState("");
   const [code, setCode] = useState("");
-  const [sent, setSent] = useState<CodeRequest>();
+  const [sent, setSent] = useState<PendingCode>();
   const [resendAt, setResendAt] = useState(0);
   const [now, setNow] = useState(Date.now());
   const [invalid, setInvalid] = useState<string>();
   const [error, setError] = useState<string>();
-  const [rejection, setRejection] = useState<RejectionScreen>();
+  const [rejection, showRejection] = useState<RejectionScreen>();
   const [busy, setBusy] = useState<"sending" | "confirming" | null>(null);
   const codeInput = useRef<React.ComponentRef<typeof TextInput>>(null);
   const mounted = useRef(true);
@@ -58,6 +57,10 @@ export function CredflareContactCode({ session, info, channel, onSubmitted, onLe
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, [waiting]);
+  function setRejection(screen: RejectionScreen | undefined) {
+    showRejection(screen);
+    onRejection?.(screen ?? null);
+  }
   function working(value: "sending" | "confirming" | null) {
     setBusy(value);
     onBusyChanged?.(value !== null);
@@ -75,6 +78,7 @@ export function CredflareContactCode({ session, info, channel, onSubmitted, onLe
       setRejection(screen);
       return;
     }
+    setRejection(undefined);
     setError(cause instanceof CredflareError && cause.status === 401 ? text("errors.session_expired") : text(fallback));
   }
   async function send(value = destination) {
@@ -88,10 +92,11 @@ export function CredflareContactCode({ session, info, channel, onSubmitted, onLe
     setError(undefined);
     working("sending");
     try {
-      const next = await session.requestCode(channel, channel === "phone" ? normalizePhone(value) : value.trim());
+      const next: CodeRequest = await session.requestCode(channel, channel === "phone" ? normalizePhone(value) : value.trim());
       if (!mounted.current) return;
-      setSent(next);
-      setResendAt(Date.now() + resendDelay(next));
+      setSent({ destination: next.destination, sends_remaining: next.sends_remaining });
+      const ready = Date.parse(next.resend_available_at);
+      setResendAt(Number.isNaN(ready) ? Date.now() + rules.resend_seconds * 1000 : ready);
       setNow(Date.now());
       setCode("");
       setRejection(undefined);
@@ -127,8 +132,14 @@ export function CredflareContactCode({ session, info, channel, onSubmitted, onLe
       case "leave":
         return onLeave(screen.code);
       case "new_code":
-      case "wait":
         return void send();
+      case "wait":
+        if (!sent || phase === "destination") setSent({ destination: destination.trim(), sends_remaining: null });
+        setRejection(undefined);
+        setCode("");
+        setError(undefined);
+        setPhase("code");
+        return setTimeout(() => codeInput.current?.focus(), 0);
       case "reenter_code":
         setRejection(undefined);
         setCode("");
@@ -138,7 +149,8 @@ export function CredflareContactCode({ session, info, channel, onSubmitted, onLe
     }
   }
   const inputStyle = [ui.input, { borderColor: p.border, color: p.ink, backgroundColor: p.surface }];
-  const resendLine = sent && sent.sends_remaining > 0
+  const canResend = !!sent && (sent.sends_remaining === null || sent.sends_remaining > 0);
+  const resendLine = canResend
     ? waiting > 0
       ? <Copy small muted accessibilityLiveRegion="polite">{text("contact_code.resend_in", { seconds: waiting })}</Copy>
       : <Link title={text("contact_code.resend")} disabled={!!busy} onPress={() => void send()} />
@@ -149,7 +161,6 @@ export function CredflareContactCode({ session, info, channel, onSubmitted, onLe
       {rejection ? (
         <RejectionPanel
           rejection={rejection}
-          disabled={rejection.action === "wait" && waiting > 0}
           loading={busy === "sending"}
           status={rejection.action === "wait" && waiting > 0 ? text("contact_code.resend_in", { seconds: waiting }) : null}
           onAction={() => act(rejection)}
@@ -213,7 +224,7 @@ export function CredflareContactCode({ session, info, channel, onSubmitted, onLe
             onPress={() => void confirm()}
           />
           {resendLine}
-          {sent && sent.sends_remaining > 0 ? <Copy small muted>{text("contact_code.sends_remaining", { count: sent.sends_remaining })}</Copy> : null}
+          {sent && sent.sends_remaining !== null && sent.sends_remaining > 0 ? <Copy small muted>{text("contact_code.sends_remaining", { count: sent.sends_remaining })}</Copy> : null}
           <Link
             title={say("change")}
             disabled={!!busy}
