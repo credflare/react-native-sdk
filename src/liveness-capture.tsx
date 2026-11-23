@@ -35,9 +35,10 @@ export interface LivenessProps {
   provider: NativeFaceProvider;
   onSubmitted: () => void;
   onBusyChanged?: (busy: boolean) => void;
+  onClosed?: () => void;
 }
 
-export function CredflareLiveness({ session, info, provider, onSubmitted, onBusyChanged }: LivenessProps) {
+export function CredflareLiveness({ session, info, provider, onSubmitted, onBusyChanged, onClosed }: LivenessProps) {
   const p = usePalette();
   const settings = facialSettings(info.profile?.verification_requirements);
   const verifier = verifierName(info);
@@ -198,6 +199,10 @@ export function CredflareLiveness({ session, info, provider, onSubmitted, onBusy
     } catch (cause) {
       if (!mounted.current) return;
       setStatus(undefined);
+      if (cause instanceof CredflareError && cause.status === 409 && onClosed) {
+        working(false);
+        return onClosed();
+      }
       if (cause instanceof CredflareError && cause.status === 422) return fail(cause.message, rejectionScreen(cause, { requester: info.requester }));
       setError(livenessErrorMessage(cause, text("errors.send_selfie_failed")));
       working(false);

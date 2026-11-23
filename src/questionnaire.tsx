@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { FlatList, Modal, Platform, Pressable, Text, TextInput, View } from "react-native";
 import type { KeyboardTypeOptions } from "react-native";
 import {
@@ -9,6 +9,7 @@ import {
   earlierAnswers,
   hasAnswer,
   isSupportedQuestion,
+  startingAnswers,
   rejectionScreen,
   text,
   verifierName,
@@ -28,6 +29,8 @@ export interface QuestionnaireProps {
   onSubmitted: (fields: Answers) => void;
   onBusyChanged?: (busy: boolean) => void;
   earlier?: Answers;
+  onUnsupported?: (answers: Answers) => void;
+  onClosed?: () => void;
 }
 
 const signedNumberKeyboard: KeyboardTypeOptions = Platform.OS === "ios" ? "numbers-and-punctuation" : "numeric";
@@ -51,16 +54,12 @@ function serverFieldErrors(errors: unknown): Record<string, string> {
   return out;
 }
 
-export function CredflareQuestionnaire({ session, info, onSubmitted, onBusyChanged, earlier: local }: QuestionnaireProps) {
+export function CredflareQuestionnaire({ session, info, onSubmitted, onBusyChanged, earlier: local, onUnsupported, onClosed }: QuestionnaireProps) {
   const p = usePalette();
   const verifier = verifierName(info);
   const schema = (info.profile?.form_schema ?? []) as Question[];
   const earlier = earlierAnswers(info, local);
-  const [answers, setAnswers] = useState<Answers>(() => {
-    const start: Answers = {};
-    for (const question of schema) if (hasAnswer(earlier, question.key)) start[question.key] = earlier[question.key];
-    return start;
-  });
+  const [answers, setAnswers] = useState<Answers>(() => startingAnswers(schema, earlier));
   const [checked, setChecked] = useState(false);
   const [serverErrors, setServerErrors] = useState<Record<string, string>>({});
   const [rejection, setRejection] = useState<RejectionScreen>();
@@ -68,7 +67,12 @@ export function CredflareQuestionnaire({ session, info, onSubmitted, onBusyChang
   const [busy, setBusy] = useState(false);
   const [picking, setPicking] = useState<Question>();
   const key = useRef(requestKey());
-  const shown = visibleQuestions(schema, answers, earlier).filter(isSupportedQuestion);
+  const visible = visibleQuestions(schema, answers, earlier);
+  const unsupported = !visible.every(isSupportedQuestion);
+  const shown = visible.filter(isSupportedQuestion);
+  useEffect(() => {
+    if (unsupported) onUnsupported?.(answers);
+  }, [unsupported, answers, onUnsupported]);
   const problems = checked ? answerProblems(schema, answers, earlier) : {};
   function working(value: boolean) {
     setBusy(value);
@@ -96,6 +100,10 @@ export function CredflareQuestionnaire({ session, info, onSubmitted, onBusyChang
       working(false);
       onSubmitted(fields);
     } catch (cause) {
+      if (cause instanceof CredflareError && cause.status === 409 && onClosed) {
+        working(false);
+        return onClosed();
+      }
       if (cause instanceof CredflareError && cause.status === 422) {
         key.current = requestKey();
         setServerErrors(serverFieldErrors(cause.errors));
@@ -232,7 +240,9 @@ export function CredflareQuestionnaire({ session, info, onSubmitted, onBusyChang
       {shown.map(field)}
       {error ? <Notice>{error}</Notice> : null}
       {busy ? <Copy small muted accessibilityLiveRegion="polite">{text("questions.sending")}</Copy> : null}
-      {rejection ? (
+      {unsupported ? (
+        <Notice>{text("receipt.host_steps")}</Notice>
+      ) : rejection ? (
         <RejectionPanel rejection={rejection} onAction={() => setRejection(undefined)} />
       ) : (
         <Action title={text("questions.send")} loading={busy} onPress={() => void send()} />

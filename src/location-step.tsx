@@ -75,12 +75,14 @@ export function CredflareLocation({
   locator = nativeLocator,
   onSubmitted,
   onBusyChanged,
+  onClosed,
 }: {
   session: CredflareSession;
   info: SessionInfo;
   locator?: Locator;
   onSubmitted: () => void;
   onBusyChanged?: (busy: boolean) => void;
+  onClosed?: () => void;
 }) {
   const p = usePalette();
   const settings = locationSettings(info.profile?.verification_requirements);
@@ -128,7 +130,9 @@ export function CredflareLocation({
       await session.submitLocation(submission, submitKey.current);
       onSubmitted();
     } catch (cause) {
-      if (cause instanceof CredflareError && cause.status === 422) {
+      if (cause instanceof CredflareError && cause.status === 409 && onClosed) {
+        onClosed();
+      } else if (cause instanceof CredflareError && cause.status === 422) {
         submitKey.current = requestKey();
         setRejection(rejectionScreen(cause, { requester: info.requester, location: settings }));
       } else {

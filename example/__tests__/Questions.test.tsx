@@ -1,7 +1,7 @@
 import React from 'react';
 import ReactTestRenderer from 'react-test-renderer';
 import { text } from '@credflare/sdk-javascript';
-import type { Question } from '@credflare/sdk-javascript';
+import type { Question, SessionInfo } from '@credflare/sdk-javascript';
 import { CredflareVerification } from '@credflare/sdk-react-native';
 import { completed, contactApi, descriptor, fakeNow, fixture, helpers, inputs, issuedAt } from '../test-support/flow-harness';
 
@@ -153,10 +153,11 @@ test('a refused answer without a code shows the server message and stays on the 
 test('a case the server closed after the last submission shows the receipt', async () => {
   const api = contactApi({ sessions: [fixture('requirement-added-session')], closedGets: [2] });
   global.fetch = api.fetcher as unknown as typeof fetch;
-  const onSubmitted = jest.fn();
+  const onSubmitted = jest.fn((info: SessionInfo) => info.status);
+  const onClosed = jest.fn();
   let renderer: ReactTestRenderer.ReactTestRenderer;
   await ReactTestRenderer.act(async () => {
-    renderer = ReactTestRenderer.create(<CredflareVerification autoStart onClose={() => {}} onSubmitted={onSubmitted} sessionProvider={descriptor} />);
+    renderer = ReactTestRenderer.create(<CredflareVerification autoStart onClose={() => {}} onSubmitted={onSubmitted} onClosed={onClosed} sessionProvider={descriptor} />);
   });
   const { texts, press, waitFor } = helpers(() => renderer!);
   const { type } = inputs(() => renderer!);
@@ -169,8 +170,8 @@ test('a case the server closed after the last submission shows the receipt', asy
   await waitFor(() => texts().includes(text('receipt.title')), 'receipt');
   expect(texts()).toContain(text('receipt.phone'));
   expect(texts()).not.toContain(text('errors.refresh_failed'));
-  expect(onSubmitted).toHaveBeenCalledTimes(1);
-  expect(onSubmitted).toHaveBeenCalledWith(null);
+  expect(onSubmitted).not.toHaveBeenCalled();
+  expect(onClosed).toHaveBeenCalledTimes(1);
   await ReactTestRenderer.act(async () => renderer!.unmount());
 }, 60000);
 
@@ -270,4 +271,55 @@ test('an answer sent before a refresh still reveals its follow up question', asy
   await view.waitFor(() => view.texts().includes(text('receipt.title')), 'receipt');
   expect(api.calls.find(call => call.url.endsWith('/submit'))!.body).toEqual({ type: 'form_submission', fields: { employer: 'Acme' } });
   await view.unmount();
+}, 60000);
+
+test('clearing an answer asked again hides its follow up and clears it on the server', async () => {
+  const sources = asked('sources');
+  const session = withSchema([sources, asked('sources_other')]);
+  const api = contactApi({ sessions: [{ ...session, data: { ...session.data, profile: { ...session.data.profile, form_answers: { sources: ['Other'] } } } }, completed('questionnaire-session')] });
+  const view = await open(api);
+  await view.waitFor(() => view.texts().includes('Other source of funds'), 'prefilled follow up');
+  await view.press('Other');
+  expect(view.texts()).not.toContain('Other source of funds');
+  await view.press(text('questions.send'));
+  await view.waitFor(() => view.texts().includes(text('receipt.title')), 'receipt');
+  expect(api.calls.find(call => call.url.endsWith('/submit'))!.body).toEqual({ type: 'form_submission', fields: { sources: null } });
+  await view.unmount();
+}, 60000);
+
+test('a revealed question the SDK cannot ask hands the form to the host', async () => {
+  const onHostActionRequired = jest.fn();
+  const onClose = jest.fn();
+  const revealing = withSchema([asked('employment'), { ...asked('employer'), type: 'signature' }]);
+  const api = contactApi({ sessions: [{ ...revealing, data: { ...revealing.data, profile: { ...revealing.data.profile, verification_requirements: [] } } }] });
+  global.fetch = api.fetcher as unknown as typeof fetch;
+  let renderer: ReactTestRenderer.ReactTestRenderer;
+  await ReactTestRenderer.act(async () => {
+    renderer = ReactTestRenderer.create(<CredflareVerification autoStart onClose={onClose} onHostActionRequired={onHostActionRequired} sessionProvider={descriptor} />);
+  });
+  const { texts, press, waitFor } = helpers(() => renderer!);
+  await waitFor(() => texts().includes(text('questions.title')), 'questionnaire');
+  await press('Employed');
+  await waitFor(() => texts().includes(text('receipt.host_steps')), 'host steps');
+  expect(api.calls.filter(call => call.url.endsWith('/submit'))).toHaveLength(0);
+  await press(text('common.return_to_app'));
+  expect(onHostActionRequired).toHaveBeenCalledWith({ code: null });
+  await ReactTestRenderer.act(async () => renderer!.unmount());
+}, 60000);
+
+test('fuzzy conditions work without TextEncoder', async () => {
+  const encoder = globalThis.TextEncoder;
+  delete (globalThis as { TextEncoder?: unknown }).TextEncoder;
+  try {
+    const employer = { ...asked('employer'), show_if: null };
+    const follow = { ...asked('income'), show_if: { conditions: [{ path: 'form.employer', op: 'fuzzy_match', value: { text: 'Acme Corporation', min_score: 80 } }] } };
+    const api = contactApi({ sessions: [withSchema([employer, follow])] });
+    const view = await open(api);
+    await view.waitFor(() => view.texts().includes('Employer name'), 'questionnaire');
+    await view.type('Employer name', 'acme corporation');
+    expect(view.texts()).toContain('Yearly income (Optional)');
+    await view.unmount();
+  } finally {
+    globalThis.TextEncoder = encoder;
+  }
 }, 60000);
