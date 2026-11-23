@@ -237,7 +237,7 @@ export function CredflareQuestionnaire({ session, info, onSubmitted, onBusyChang
       default:
         control = typed("default");
     }
-    const clearable = !question.required && typeof value === "string" && ["select", "single_select", "country"].includes(question.type);
+    const clearable = !question.required && typeof value === "string" && value !== "" && ["select", "single_select", "country", "date"].includes(question.type);
     return (
       <View key={question.key} style={ui.field}>
         {question.type === "consent" ? null : label}

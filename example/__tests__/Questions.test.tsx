@@ -347,23 +347,26 @@ test('changing an earlier answer so it reveals a question the SDK cannot ask han
   await ReactTestRenderer.act(async () => renderer!.unmount());
 }, 30000);
 
-test('an optional country or single choice asked again can be cleared and is sent as null', async () => {
+test('an optional country, single choice or date asked again can be removed and is sent as null', async () => {
   const country = { ...asked('country'), required: false, show_if: null };
   const employment = { ...asked('employment'), required: false, show_if: null };
-  const form = withSchema([country, employment]);
-  const api = contactApi({ sessions: [{ ...form, data: { ...form.data, profile: { ...form.data.profile, form_answers: { country: 'DE', employment: 'Student' } } } }, completed('questionnaire-session')] });
+  const birth = { ...asked('birth_date'), required: false, show_if: null };
+  const form = withSchema([country, employment, birth]);
+  const api = contactApi({ sessions: [{ ...form, data: { ...form.data, profile: { ...form.data.profile, form_answers: { country: 'DE', employment: 'Student', birth_date: '1990-01-31' } } } }, completed('questionnaire-session')] });
   const view = await open(api);
   await view.waitFor(() => view.texts().includes('Germany'), 'prefilled country');
   const remove = text('questions.founders_remove');
-  expect(view.texts().filter(value => value === remove)).toHaveLength(2);
+  expect(view.texts().filter(value => value === remove)).toHaveLength(3);
   await view.press(remove);
   expect(view.texts()).not.toContain('Germany');
   expect(view.texts()).toContain(text('questions.choose_country'));
   await view.press(remove);
+  await view.press(remove);
   expect(view.texts()).not.toContain(remove);
+  expect(view.field('Date of birth').props.value).toBe('');
   await view.press(text('questions.send'));
   await view.waitFor(() => view.texts().includes(text('receipt.title')), 'receipt');
-  expect(api.calls.find(call => call.url.endsWith('/submit'))!.body).toEqual({ type: 'form_submission', fields: { country: null, employment: null } });
+  expect(api.calls.find(call => call.url.endsWith('/submit'))!.body).toEqual({ type: 'form_submission', fields: { country: null, employment: null, birth_date: null } });
   await view.unmount();
 }, 30000);
 
