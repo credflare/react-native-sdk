@@ -1,8 +1,9 @@
 import React from 'react';
 import ReactTestRenderer from 'react-test-renderer';
 import { text } from '@credflare/sdk-javascript';
+import type { Question } from '@credflare/sdk-javascript';
 import { CredflareVerification } from '@credflare/sdk-react-native';
-import { completed, contactApi, descriptor, fixture, helpers, inputs } from '../test-support/flow-harness';
+import { completed, contactApi, descriptor, fakeNow, fixture, helpers, inputs, issuedAt } from '../test-support/flow-harness';
 
 const verifier = fixture('questionnaire-session').data.requester.name;
 
@@ -16,6 +17,7 @@ async function open(api: ReturnType<typeof contactApi>, onClose = jest.fn()) {
 }
 
 test('answers the questionnaire, then confirms a phone number the workflow added, then shows the receipt', async () => {
+  fakeNow(issuedAt('phone-code-request'));
   const api = contactApi({
     sessions: [fixture('questionnaire-session'), fixture('requirement-added-session'), completed('requirement-added-session')],
     confirms: ['rejections/phone.code_invalid'],
@@ -101,6 +103,7 @@ test('answers the questionnaire, then confirms a phone number the workflow added
   const confirms = api.calls.filter(call => call.url.endsWith('/phone-codes/confirm')).map(call => call.body);
   expect(confirms).toEqual([{ code: '123456' }, { code: '654321' }]);
   await view.unmount();
+  jest.useRealTimers();
 }, 60000);
 
 test('a failed check after a submit asks to try again and never shows the receipt', async () => {
@@ -167,5 +170,104 @@ test('a case the server closed after the last submission shows the receipt', asy
   expect(texts()).toContain(text('receipt.phone'));
   expect(texts()).not.toContain(text('errors.refresh_failed'));
   expect(onSubmitted).toHaveBeenCalledTimes(1);
+  expect(onSubmitted).toHaveBeenCalledWith(null);
   await ReactTestRenderer.act(async () => renderer!.unmount());
+}, 60000);
+
+const base = fixture('questionnaire-session');
+const schema: Question[] = base.data.profile.form_schema;
+const withSchema = (questions: Question[]) => ({ ...base, data: { ...base.data, profile: { ...base.data.profile, form_schema: questions } } });
+const asked = (key: string) => schema.find(question => question.key === key)!;
+
+test('a follow up questionnaire uses the answers sent before it', async () => {
+  const first = withSchema(schema.filter(question => question.key !== 'employer'));
+  const api = contactApi({ sessions: [first, withSchema([asked('employer')]), completed('questionnaire-session')] });
+  const view = await open(api);
+  const { texts, press, waitFor, type } = view;
+  await waitFor(() => texts().includes(text('questions.title')), 'questionnaire');
+  await press('Employed');
+  await press(text('questions.choose_country'));
+  await type('Country of residence', 'cm');
+  await press('Cameroon');
+  await type('Date of birth', '1990-01-31');
+  await press(asked('terms').label);
+  await press(text('questions.send'));
+  await waitFor(() => texts().includes('Employer name'), 'follow up question');
+  await type('Employer name', 'Acme');
+  await press(text('questions.send'));
+  await waitFor(() => texts().includes(text('receipt.title')), 'receipt');
+  const submits = api.calls.filter(call => call.url.endsWith('/submit')).map(call => (call.body as { fields: unknown }).fields);
+  expect(submits[1]).toEqual({ employer: 'Acme' });
+  await view.unmount();
+}, 60000);
+
+test('numbers are sent exactly as typed and the number keyboard allows a sign', async () => {
+  const income = { ...asked('income'), show_if: null, min: null, max: null };
+  const api = contactApi({ sessions: [withSchema([income]), completed('questionnaire-session')] });
+  const view = await open(api);
+  await view.waitFor(() => view.texts().includes(text('questions.title')), 'questionnaire');
+  expect(view.field('Yearly income').props.keyboardType).toBe('numbers-and-punctuation');
+  await view.type('Yearly income', '9007199254740993');
+  await view.press(text('questions.send'));
+  await view.waitFor(() => view.texts().includes(text('receipt.title')), 'receipt');
+  expect(api.calls.find(call => call.url.endsWith('/submit'))!.body).toEqual({ type: 'form_submission', fields: { income: '9007199254740993' } });
+  await view.unmount();
+}, 60000);
+
+test('a question keyed constructor renders and is validated like any other', async () => {
+  const api = contactApi({ sessions: [withSchema([{ ...asked('employer'), key: 'constructor', show_if: null }]), completed('questionnaire-session')] });
+  const view = await open(api);
+  await view.waitFor(() => view.texts().includes('Employer name'), 'questionnaire');
+  await view.press(text('questions.send'));
+  expect(view.texts()).toContain(text('questions.required'));
+  await view.type('Employer name', 'Acme');
+  await view.press(text('questions.send'));
+  await view.waitFor(() => view.texts().includes(text('receipt.title')), 'receipt');
+  expect(api.calls.find(call => call.url.endsWith('/submit'))!.body).toEqual({ type: 'form_submission', fields: { constructor: 'Acme' } });
+  await view.unmount();
+}, 60000);
+
+test('questions and rejections work on runtimes without Object.hasOwn', async () => {
+  const hasOwn = Object.hasOwn;
+  delete (Object as { hasOwn?: unknown }).hasOwn;
+  try {
+    const api = contactApi({ sessions: [withSchema([asked('employment'), asked('employer')]), completed('questionnaire-session')], submits: ['rejections/phone.not_configured'] });
+    const view = await open(api);
+    await view.waitFor(() => view.texts().includes(text('questions.title')), 'questionnaire');
+    await view.press('Employed');
+    await view.type('Employer name', 'Acme');
+    await view.press(text('questions.send'));
+    await view.waitFor(() => view.texts().includes(text('rejection.phone_not_configured.title', { verifier })), 'mapped rejection');
+    await view.unmount();
+  } finally {
+    Object.hasOwn = hasOwn;
+  }
+}, 60000);
+
+test('founders are entered as names plus the applicant toggle', async () => {
+  const founders = { ...asked('employer'), key: 'founders', label: 'Founders', type: 'founders', show_if: null };
+  const api = contactApi({ sessions: [withSchema([founders]), completed('questionnaire-session')] });
+  const view = await open(api);
+  await view.waitFor(() => view.texts().includes('Founders'), 'questionnaire');
+  await view.press(text('questions.send'));
+  expect(view.texts()).toContain(text('questions.required'));
+  await view.press(text('questions.founders_add'));
+  await view.type('Founders 1', ' Ada Lovelace ');
+  await view.press(text('questions.founders_add'));
+  await view.press(text('questions.founders_includes_me'));
+  await view.press(text('questions.send'));
+  await view.waitFor(() => view.texts().includes(text('receipt.title')), 'receipt');
+  expect(api.calls.find(call => call.url.endsWith('/submit'))!.body).toEqual({ type: 'form_submission', fields: { founders: { includes_applicant: true, names: ['Ada Lovelace'] } } });
+  await view.unmount();
+}, 60000);
+
+test('an answer sent before a refresh still reveals its follow up question', async () => {
+  const api = contactApi({ sessions: [fixture('questionnaire-earlier-answers-session'), completed('questionnaire-session')] });
+  const view = await open(api);
+  await view.waitFor(() => view.texts().includes('Employer name'), 'follow up question');
+  await view.type('Employer name', 'Acme');
+  await view.press(text('questions.send'));
+  await view.waitFor(() => view.texts().includes(text('receipt.title')), 'receipt');
+  expect(api.calls.find(call => call.url.endsWith('/submit'))!.body).toEqual({ type: 'form_submission', fields: { employer: 'Acme' } });
+  await view.unmount();
 }, 60000);

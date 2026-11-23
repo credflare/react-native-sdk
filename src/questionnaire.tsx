@@ -1,16 +1,20 @@
 import React, { useMemo, useRef, useState } from "react";
-import { FlatList, Modal, Pressable, Text, TextInput, View } from "react-native";
+import { FlatList, Modal, Platform, Pressable, Text, TextInput, View } from "react-native";
 import type { KeyboardTypeOptions } from "react-native";
 import {
   CredflareError,
+  answerFor,
   answerProblems,
   answersPayload,
+  earlierAnswers,
+  hasAnswer,
+  isSupportedQuestion,
   rejectionScreen,
   text,
   verifierName,
   visibleQuestions,
 } from "@credflare/sdk-javascript";
-import type { Answers, CredflareSession, Question, QuestionProblem, RejectionScreen, SessionInfo } from "@credflare/sdk-javascript";
+import type { Answers, CredflareSession, FoundersAnswer, Question, QuestionProblem, RejectionScreen, SessionInfo } from "@credflare/sdk-javascript";
 import { requestKey } from "./request-key";
 import { countries, countryName } from "./countries";
 import { Action, Copy, Link, Notice, Title, usePalette } from "./ui";
@@ -21,9 +25,12 @@ import { ui } from "./theme";
 export interface QuestionnaireProps {
   session: CredflareSession;
   info: SessionInfo;
-  onSubmitted: () => void;
+  onSubmitted: (fields: Answers) => void;
   onBusyChanged?: (busy: boolean) => void;
+  earlier?: Answers;
 }
+
+const signedNumberKeyboard: KeyboardTypeOptions = Platform.OS === "ios" ? "numbers-and-punctuation" : "numeric";
 
 const say = (problem: QuestionProblem) => text(problem.key, problem.values);
 
@@ -36,7 +43,7 @@ export function formatDateInput(value: string): string {
 
 function serverFieldErrors(errors: unknown): Record<string, string> {
   if (!errors || typeof errors !== "object" || Array.isArray(errors)) return {};
-  const out: Record<string, string> = {};
+  const out: Record<string, string> = Object.create(null);
   for (const [field, messages] of Object.entries(errors as Record<string, unknown>)) {
     const first = Array.isArray(messages) ? messages[0] : messages;
     if (typeof first === "string") out[field.replace(/^fields\./, "")] = first;
@@ -44,11 +51,16 @@ function serverFieldErrors(errors: unknown): Record<string, string> {
   return out;
 }
 
-export function CredflareQuestionnaire({ session, info, onSubmitted, onBusyChanged }: QuestionnaireProps) {
+export function CredflareQuestionnaire({ session, info, onSubmitted, onBusyChanged, earlier: local }: QuestionnaireProps) {
   const p = usePalette();
   const verifier = verifierName(info);
   const schema = (info.profile?.form_schema ?? []) as Question[];
-  const [answers, setAnswers] = useState<Answers>({});
+  const earlier = earlierAnswers(info, local);
+  const [answers, setAnswers] = useState<Answers>(() => {
+    const start: Answers = {};
+    for (const question of schema) if (hasAnswer(earlier, question.key)) start[question.key] = earlier[question.key];
+    return start;
+  });
   const [checked, setChecked] = useState(false);
   const [serverErrors, setServerErrors] = useState<Record<string, string>>({});
   const [rejection, setRejection] = useState<RejectionScreen>();
@@ -56,8 +68,8 @@ export function CredflareQuestionnaire({ session, info, onSubmitted, onBusyChang
   const [busy, setBusy] = useState(false);
   const [picking, setPicking] = useState<Question>();
   const key = useRef(requestKey());
-  const shown = visibleQuestions(schema, answers);
-  const problems = checked ? answerProblems(schema, answers) : {};
+  const shown = visibleQuestions(schema, answers, earlier).filter(isSupportedQuestion);
+  const problems = checked ? answerProblems(schema, answers, earlier) : {};
   function working(value: boolean) {
     setBusy(value);
     onBusyChanged?.(value);
@@ -65,19 +77,24 @@ export function CredflareQuestionnaire({ session, info, onSubmitted, onBusyChang
   function answer(question: Question, value: unknown) {
     key.current = requestKey();
     setAnswers(current => ({ ...current, [question.key]: value }));
-    setServerErrors(({ [question.key]: _gone, ...rest }) => rest);
+    setServerErrors(current => {
+      const rest: Record<string, string> = Object.create(null);
+      for (const key of Object.keys(current)) if (key !== question.key) rest[key] = current[key];
+      return rest;
+    });
   }
   async function send() {
     if (busy) return;
     setChecked(true);
     setError(undefined);
     setRejection(undefined);
-    if (Object.keys(answerProblems(schema, answers)).length) return;
+    if (Object.keys(answerProblems(schema, answers, earlier)).length) return;
     working(true);
     try {
-      await session.submitAnswers(answersPayload(schema, answers), key.current);
+      const fields = answersPayload(schema, answers, earlier);
+      await session.submitAnswers(fields, key.current);
       working(false);
-      onSubmitted();
+      onSubmitted(fields);
     } catch (cause) {
       if (cause instanceof CredflareError && cause.status === 422) {
         key.current = requestKey();
@@ -91,8 +108,8 @@ export function CredflareQuestionnaire({ session, info, onSubmitted, onBusyChang
   }
   const inputStyle = [ui.input, { borderColor: p.border, color: p.ink, backgroundColor: p.surface }];
   function field(question: Question) {
-    const value = answers[question.key];
-    const problem = problems[question.key] ? say(problems[question.key]) : serverErrors[question.key];
+    const value = answerFor(answers, question.key);
+    const problem = hasAnswer(problems, question.key) ? say(problems[question.key]) : hasAnswer(serverErrors, question.key) ? serverErrors[question.key] : undefined;
     const title = question.required ? question.label : `${question.label} (${text("questions.optional")})`;
     const label = <Text style={[ui.subtitle, { color: p.ink }]}>{title}</Text>;
     const typed = (keyboardType: KeyboardTypeOptions, extra: Partial<React.ComponentProps<typeof TextInput>> = {}) => (
@@ -113,7 +130,10 @@ export function CredflareQuestionnaire({ session, info, onSubmitted, onBusyChang
         control = typed("default", { multiline: true, style: [...inputStyle, ui.textarea] });
         break;
       case "number":
-        control = typed("decimal-pad");
+        control = typed(signedNumberKeyboard);
+        break;
+      case "founders":
+        control = <FoundersInput label={question.label} value={value} busy={busy} onChange={next => answer(question, next)} />;
         break;
       case "date":
         control = typed("number-pad", {
@@ -225,6 +245,48 @@ export function CredflareQuestionnaire({ session, info, onSubmitted, onBusyChang
           setPicking(undefined);
         }}
       />
+    </View>
+  );
+}
+
+function FoundersInput({ label, value, busy, onChange }: { label: string; value: unknown; busy: boolean; onChange: (next: FoundersAnswer) => void }) {
+  const p = usePalette();
+  const current = value && typeof value === "object" && !Array.isArray(value) ? (value as Partial<FoundersAnswer>) : {};
+  const includes = current.includes_applicant === true;
+  const names = Array.isArray(current.names) ? current.names.map(name => (typeof name === "string" ? name : "")) : [];
+  const inputStyle = [ui.input, { borderColor: p.border, color: p.ink, backgroundColor: p.surface }];
+  return (
+    <View style={{ gap: 8 }}>
+      <Pressable
+        accessibilityRole="checkbox"
+        accessibilityState={{ checked: includes, disabled: busy }}
+        disabled={busy}
+        onPress={() => onChange({ includes_applicant: !includes, names })}
+        style={({ pressed }) => [ui.choice, { borderColor: includes ? p.primary : p.border, backgroundColor: includes || pressed ? p.soft : p.surface }]}
+      >
+        <View style={[ui.tick, { borderRadius: 4, borderColor: includes ? p.primary : p.muted, backgroundColor: includes ? p.primary : "transparent" }]} />
+        <Text style={[ui.body, { color: p.ink, flexShrink: 1 }]}>{text("questions.founders_includes_me")}</Text>
+      </Pressable>
+      {names.map((name, index) => (
+        <View key={index} style={{ gap: 4 }}>
+          <TextInput
+            accessibilityLabel={`${label} ${index + 1}`}
+            placeholder={text("questions.founders_name")}
+            placeholderTextColor={p.muted}
+            value={name}
+            onChangeText={next => onChange({ includes_applicant: includes, names: names.map((item, at) => (at === index ? next : item)) })}
+            autoComplete="name"
+            editable={!busy}
+            style={inputStyle}
+          />
+          <Link
+            title={text("questions.founders_remove")}
+            disabled={busy}
+            onPress={() => onChange({ includes_applicant: includes, names: names.filter((_, at) => at !== index) })}
+          />
+        </View>
+      ))}
+      <Link title={text("questions.founders_add")} disabled={busy} onPress={() => onChange({ includes_applicant: includes, names: [...names, ""] })} />
     </View>
   );
 }
