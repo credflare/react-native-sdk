@@ -18,6 +18,7 @@ const rules = requirements.contact_codes;
 
 interface PendingCode {
   destination: string;
+  typed: string;
   sends_remaining: number | null;
 }
 
@@ -29,9 +30,10 @@ export interface ContactCodeProps {
   onLeave: (code: string | null) => void;
   onBusyChanged?: (busy: boolean) => void;
   onRejection?: (rejection: RejectionScreen | null) => void;
+  onClosed?: () => void;
 }
 
-export function CredflareContactCode({ session, info, channel, onSubmitted, onLeave, onBusyChanged, onRejection }: ContactCodeProps) {
+export function CredflareContactCode({ session, info, channel, onSubmitted, onLeave, onBusyChanged, onRejection, onClosed }: ContactCodeProps) {
   const p = usePalette();
   const verifier = verifierName(info);
   const say = (key: string) => text(`${channel}.${key}` as CopyKey, { verifier });
@@ -43,6 +45,7 @@ export function CredflareContactCode({ session, info, channel, onSubmitted, onLe
   const [now, setNow] = useState(Date.now());
   const [invalid, setInvalid] = useState<string>();
   const [error, setError] = useState<string>();
+  const [note, setNote] = useState<string>();
   const [rejection, showRejection] = useState<RejectionScreen>();
   const [busy, setBusy] = useState<"sending" | "confirming" | null>(null);
   const codeInput = useRef<React.ComponentRef<typeof TextInput>>(null);
@@ -66,6 +69,7 @@ export function CredflareContactCode({ session, info, channel, onSubmitted, onLe
     onBusyChanged?.(value !== null);
   }
   function failed(cause: unknown, fallback: CopyKey) {
+    if (cause instanceof CredflareError && cause.status === 409 && onClosed) return onClosed();
     if (cause instanceof CredflareError && cause.status === 422) {
       const screen = rejectionScreen(cause, { requester: info.requester });
       if (screen.action === "wait") {
@@ -73,6 +77,15 @@ export function CredflareContactCode({ session, info, channel, onSubmitted, onLe
         const at = Date.now();
         setResendAt(current => (!Number.isNaN(hinted) ? hinted : current > at ? current : at + rules.resend_seconds * 1000));
         setNow(Date.now());
+        const elsewhere = !!sent && sent.typed !== destination;
+        if (sent) setDestination(sent.typed);
+        else setSent({ destination: destination.trim(), typed: destination, sends_remaining: null });
+        setRejection(undefined);
+        setError(screen.message);
+        setNote(elsewhere ? text(channel === "email" ? "email.change_after" : "phone.change_after") : undefined);
+        setPhase("code");
+        setTimeout(() => codeInput.current?.focus(), 0);
+        return;
       }
       if (screen.action === "reenter_code") setCode("");
       setRejection(screen);
@@ -94,7 +107,8 @@ export function CredflareContactCode({ session, info, channel, onSubmitted, onLe
     try {
       const next: CodeRequest = await session.requestCode(channel, channel === "phone" ? normalizePhone(value) : value.trim());
       if (!mounted.current) return;
-      setSent({ destination: next.destination, sends_remaining: next.sends_remaining });
+      setSent({ destination: next.destination, typed: value, sends_remaining: next.sends_remaining });
+      setNote(undefined);
       const ready = Date.parse(next.resend_available_at);
       setResendAt(Number.isNaN(ready) ? Date.now() + rules.resend_seconds * 1000 : ready);
       setNow(Date.now());
@@ -133,13 +147,6 @@ export function CredflareContactCode({ session, info, channel, onSubmitted, onLe
         return onLeave(screen.code);
       case "new_code":
         return void send();
-      case "wait":
-        if (!sent || phase === "destination") setSent({ destination: destination.trim(), sends_remaining: null });
-        setRejection(undefined);
-        setCode("");
-        setError(undefined);
-        setPhase("code");
-        return setTimeout(() => codeInput.current?.focus(), 0);
       case "reenter_code":
         setRejection(undefined);
         setCode("");
@@ -216,6 +223,7 @@ export function CredflareContactCode({ session, info, channel, onSubmitted, onLe
             />
           </View>
           {error ? <Notice>{error}</Notice> : null}
+          {note ? <Copy small muted>{note}</Copy> : null}
           {busy === "confirming" ? <Copy small muted accessibilityLiveRegion="polite">{text("contact_code.confirming")}</Copy> : null}
           <Action
             title={text("contact_code.confirm")}
@@ -228,7 +236,7 @@ export function CredflareContactCode({ session, info, channel, onSubmitted, onLe
           <Link
             title={say("change")}
             disabled={!!busy}
-            onPress={() => { setPhase("destination"); setError(undefined); }}
+            onPress={() => { setPhase("destination"); setError(undefined); setNote(undefined); }}
           />
         </>
       )}

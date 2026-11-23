@@ -57,6 +57,18 @@ test.each(codes)('%s shows the shared copy and its action', async code => {
     await press(text('contact_code.confirm'));
   }
   const copy = (rejections.codes as Record<string, { title: CopyKey; message: CopyKey; action: keyof typeof rejections.actions }>)[code];
+  const requests = () => api.calls.filter(call => call.url.endsWith(`/${channel}-codes`)).length;
+  if (copy.action === 'wait') {
+    await waitFor(() => texts().includes(text('contact_code.title')), 'code entry');
+    expect(texts()).toContain(text(copy.message, { verifier }));
+    expect(texts()).toContain(text('contact_code.resend_in', { seconds: 42 }));
+    expect(texts()).not.toContain(text('contact_code.resend'));
+    expect(field(text('contact_code.label')).props.value).toBe('');
+    expect(requests()).toBe(1);
+    await ReactTestRenderer.act(async () => renderer!.unmount());
+    jest.useRealTimers();
+    return;
+  }
   await waitFor(() => texts().includes(text(copy.title, { verifier })), 'rejection title');
   expect(texts()).toEqual(expect.arrayContaining([
     text(copy.message, { verifier }),
@@ -66,7 +78,6 @@ test.each(codes)('%s shows the shared copy and its action', async code => {
   ]));
   const server = fixture(`rejections/${code}`).message;
   if (server !== text(copy.message, { verifier })) expect(texts()).not.toContain(server);
-  const requests = () => api.calls.filter(call => call.url.endsWith(`/${channel}-codes`)).length;
   const before = requests();
   switch (copy.action) {
     case 'leave':
@@ -74,16 +85,6 @@ test.each(codes)('%s shows the shared copy and its action', async code => {
       expect(onHostActionRequired).toHaveBeenCalledWith({ code });
       expect(onClose).toHaveBeenCalledTimes(1);
       break;
-    case 'wait': {
-      expect(texts()).toContain(text('contact_code.resend_in', { seconds: 42 }));
-      await press(text('rejection.action.wait'));
-      expect(texts()).toContain(text('contact_code.title'));
-      expect(field(text('contact_code.label')).props.value).toBe('');
-      expect(texts()).toContain(text('contact_code.resend_in', { seconds: 42 }));
-      expect(texts()).not.toContain(text('contact_code.resend'));
-      expect(requests()).toBe(before);
-      break;
-    }
     case 'new_code':
       await press(text('rejection.action.new_code'));
       await waitFor(() => requests() === before + 1 && texts().includes(text('contact_code.title')), 'new code');
@@ -204,8 +205,8 @@ test('a resend rejection without a code on screen lets the applicant type the co
     await view.waitFor(() => view.texts().includes(text('phone.title')), 'destination');
     await view.type(text('phone.label'), '+237 650 000 001');
     await view.press(text('phone.send'));
-    await view.waitFor(() => view.texts().includes(text('rejection.code_resend_too_soon.title', { verifier })), 'rejection');
-    await view.press(text('rejection.action.wait'));
+    await view.waitFor(() => view.texts().includes(text('contact_code.title')), 'code entry');
+    expect(view.texts()).toContain(text('rejection.code_resend_too_soon.message', { verifier }));
     expect(view.texts()).toContain(text('contact_code.body', { destination: '+237 650 000 001', minutes: requirements.contact_codes.ttl_minutes }));
     expect(view.texts()).toContain(text('contact_code.resend_in', { seconds: 30 }));
     await view.type(text('contact_code.label'), '123456');
@@ -247,4 +248,45 @@ test('the resend countdown runs to the deadline the server set, even when the re
   } finally {
     jest.useRealTimers();
   }
+}, 30000);
+
+test('a refused new number during the cooldown keeps the code entry for the number that has a code', async () => {
+  const rejection = fixture('rejections/phone.resend_too_soon');
+  fakeNow(Date.parse(rejection.resend_available_at) - 30000);
+  try {
+    const api = contactApi({ sessions: [session('phone')], codes: ['phone-code-request', 'rejections/phone.resend_too_soon'] });
+    const view = await openFlow(api);
+    await view.waitFor(() => view.texts().includes(text('phone.title')), 'destination');
+    await view.type(text('phone.label'), '+237650000001');
+    await view.press(text('phone.send'));
+    await view.waitFor(() => view.texts().includes(text('contact_code.title')), 'code entry');
+    await view.press(text('phone.change'));
+    await view.type(text('phone.label'), '+237650000002');
+    await view.press(text('phone.send'));
+    await view.waitFor(() => view.texts().includes(text('phone.change_after')), 'note');
+    const sent = fixture('phone-code-request').data;
+    expect(view.texts()).toContain(text('contact_code.body', { destination: sent.destination, minutes: requirements.contact_codes.ttl_minutes }));
+    expect(view.texts()).toContain(text('contact_code.resend_in', { seconds: 30 }));
+    expect(view.texts().join(' ')).not.toContain('+237650000002');
+    await view.unmount();
+  } finally {
+    jest.useRealTimers();
+  }
+}, 30000);
+
+test('a confirmation refused because the case closed ends on the receipt', async () => {
+  const onClosed = jest.fn();
+  const onSubmitted = jest.fn();
+  const api = contactApi({ sessions: [session('phone')], confirms: ['session-closed'], statuses: { 'session-closed': 409 } });
+  const view = await openFlow(api, { onClosed, onSubmitted });
+  await view.waitFor(() => view.texts().includes(text('phone.title')), 'destination');
+  await view.type(text('phone.label'), '+237650000001');
+  await view.press(text('phone.send'));
+  await view.waitFor(() => view.texts().includes(text('contact_code.title')), 'code entry');
+  await view.type(text('contact_code.label'), '123456');
+  await view.press(text('contact_code.confirm'));
+  await view.waitFor(() => view.texts().includes(text('receipt.title')), 'receipt');
+  expect(onClosed).toHaveBeenCalledTimes(1);
+  expect(onSubmitted).not.toHaveBeenCalled();
+  await view.unmount();
 }, 30000);

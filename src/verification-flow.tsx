@@ -52,7 +52,8 @@ import { ui } from "./theme";
 export interface VerificationProps {
   sessionProvider: () => Promise<SessionDescriptor>;
   onClose: () => void;
-  onSubmitted?: (info: SessionInfo | null) => void;
+  onSubmitted?: (info: SessionInfo) => void;
+  onClosed?: () => void;
   onCancelled?: () => void;
   onHostActionRequired?: (details: { code: string | null }) => void;
   autoStart?: boolean;
@@ -96,6 +97,7 @@ export function CredflareVerification({
   sessionProvider,
   onClose,
   onSubmitted,
+  onClosed,
   onCancelled,
   onHostActionRequired,
   autoStart = false,
@@ -106,7 +108,8 @@ export function CredflareVerification({
     client = useRef<CredflareSession | undefined>(undefined),
     active = useRef(false),
     mounted = useRef(true),
-    answered = useRef<Answers>({});
+    answered = useRef<Answers>({}),
+    unsent = useRef<Answers>({});
   const [info, setInfo] = useState<SessionInfo>(),
     [document, setDocument] = useState<DocumentRequirement>(),
     [loading, setLoading] = useState(false),
@@ -118,6 +121,7 @@ export function CredflareVerification({
     [pendingReceipt, setPendingReceipt] = useState(false),
     [closed, setClosed] = useState(false),
     [leaveCode, setLeaveCode] = useState<string | null>(),
+    [, setHandedBack] = useState(0),
     [received, setReceived] = useState<string[]>([]);
   const message = (cause: unknown, fallback: string) =>
     cause instanceof CredflareError
@@ -172,18 +176,22 @@ export function CredflareVerification({
       if (!mounted.current) return;
       setInfo(metadata);
       setPendingReceipt(false);
-      if (nextStep(metadata, earlierAnswers(metadata, answered.current)) === "done") onSubmitted?.(metadata);
+      if (nextStep(metadata, earlierAnswers(metadata, { ...answered.current, ...unsent.current })) === "done") onSubmitted?.(metadata);
     } catch (cause) {
       if (!mounted.current) return;
       if (cause instanceof CredflareError && cause.status === 409) {
-        setClosed(true);
-        setPendingReceipt(false);
-        onSubmitted?.(null);
+        markClosed();
       } else setError(text("errors.refresh_failed"));
     } finally {
       active.current = false;
       if (mounted.current) setLoading(false);
     }
+  }
+  function markClosed() {
+    setClosed(true);
+    setPendingReceipt(false);
+    setDocument(undefined);
+    onClosed?.();
   }
   function leaveDocument() {
     if (captureDirty) setConfirmDiscard(true);
@@ -191,7 +199,7 @@ export function CredflareVerification({
   }
   const verifier = verifierName(info);
   const docs = info?.profile?.document_requirements ?? [];
-  const step = closed ? "done" : info ? nextStep(info, earlierAnswers(info, answered.current)) : null;
+  const step = closed ? "done" : info ? nextStep(info, earlierAnswers(info, { ...answered.current, ...unsent.current })) : null;
   const allReceived = !pendingReceipt && (step === "done" || step === "host");
   const finish = () => {
     if (step === "host") onHostActionRequired?.({ code: null });
@@ -332,6 +340,7 @@ export function CredflareVerification({
             info={info}
             provider={faceProvider}
             onSubmitted={() => receiveStep("facial_verification")}
+            onClosed={markClosed}
             onBusyChanged={setCaptureBusy}
           />
         ) : step === "location_verification" ? (
@@ -340,6 +349,7 @@ export function CredflareVerification({
             info={info}
             locator={locator}
             onSubmitted={() => receiveStep("location_verification")}
+            onClosed={markClosed}
             onBusyChanged={setCaptureBusy}
           />
         ) : step === "questions" ? (
@@ -350,8 +360,14 @@ export function CredflareVerification({
             earlier={answered.current}
             onSubmitted={fields => {
               answered.current = { ...answered.current, ...fields };
+              unsent.current = {};
               receiveStep("questions");
             }}
+            onUnsupported={answers => {
+              unsent.current = answers;
+              setHandedBack(count => count + 1);
+            }}
+            onClosed={markClosed}
             onBusyChanged={setCaptureBusy}
           />
         ) : step === "email_verification" || step === "phone_verification" ? (
@@ -363,6 +379,7 @@ export function CredflareVerification({
             onSubmitted={() => receiveStep(step)}
             onLeave={leave}
             onBusyChanged={setCaptureBusy}
+            onClosed={markClosed}
             onRejection={screen => setLeaveCode(screen?.action === "leave" ? screen.code : undefined)}
           />
         ) : (
